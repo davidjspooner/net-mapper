@@ -1,0 +1,38 @@
+scan_frequency: 60m
+memory_duration: 240h
+
+sources:
+  - name: management_vlans
+    kind: ip
+    cidr:
+      - "192.168.3.0/24"
+  - name: nodexporters
+    kind: http
+    sources:
+      - management_vlans
+    url: "http://TBD:9100/metrics"
+  - name: public_snmp
+    kind: snmp
+    community: "public"
+    version: v2c
+targets:
+  - name: nodeexporter
+    sources: 
+      - nodeexporters
+    reports:
+      - template_file: nodeexporter.tmpl
+        namespace: "observability"
+    publishers:
+      - type: log
+  - name: snmp
+    scanners: 
+      - management_vlans
+    reports:
+      - name: snmpexporter
+        template_file: probe-snmpexporter.tmpl
+        namespace: "observability"
+        community: "public"
+        version: v2c
+    publishers:
+      - type: log
+        report: snmpexporter
