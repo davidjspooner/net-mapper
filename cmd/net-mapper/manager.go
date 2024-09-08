@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/davidjspooner/net-mapper/internal/framework"
@@ -46,6 +47,12 @@ func (m *Manager) ReloadConfig(ctx context.Context, configPath string) error {
 		return err
 	}
 
+	//change directory to config files so other file opens are relative to it
+	err = os.Chdir(filepath.Dir(configPath))
+	if err != nil {
+		return err
+	}
+
 	if config.ScanFrequency == "" {
 		config.ScanFrequency = "30m" // 100 days
 	}
@@ -65,6 +72,7 @@ func (m *Manager) ReloadConfig(ctx context.Context, configPath string) error {
 	sources := framework.PluginMap[source.Source]{
 		Class:   "source",
 		Factory: source.NewSource,
+		Require: framework.RequireName | framework.RequireKind | framework.SupportSources,
 	}
 
 	err = sources.LoadAll(config.Sources)
@@ -101,7 +109,7 @@ func (m *Manager) ReloadConfig(ctx context.Context, configPath string) error {
 	for _, targetConfig := range config.Targets {
 		_, ok := m.targets[targetConfig.Name]
 		if ok {
-			return fmt.Errorf("job %s already exists", targetConfig.Name)
+			return fmt.Errorf("target %s already exists", targetConfig.Name)
 		}
 
 		job, err := NewTarget(targetConfig)

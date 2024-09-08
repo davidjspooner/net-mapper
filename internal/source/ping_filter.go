@@ -7,19 +7,19 @@ import (
 	"github.com/davidjspooner/net-mapper/internal/framework"
 )
 
-type Ping struct {
+type pingFilter struct {
 }
 
-var _ Filter = (*Ping)(nil)
+var _ Filter = (*pingFilter)(nil)
 
 func init() {
 	Register("ping", newPingFilter)
 }
 
 func newPingFilter(args framework.Config) (Source, error) {
-	h := &Ping{}
+	h := &pingFilter{}
 
-	err := framework.CheckKeys(args)
+	err := framework.CheckFields(args)
 	if err != nil {
 		return nil, err
 	}
@@ -27,10 +27,10 @@ func newPingFilter(args framework.Config) (Source, error) {
 	return h, nil
 }
 
-func (h *Ping) Filter(ctx context.Context, input HostList) (HostList, error) {
-	return nil, fmt.Errorf("Ping condition not implemented")
+func (h *pingFilter) Filter(ctx context.Context, input HostList) (HostList, error) {
+	return nil, fmt.Errorf("ping condition not implemented")
 }
 
-func (h *Ping) Kind() string {
+func (h *pingFilter) Kind() string {
 	return "ping"
 }

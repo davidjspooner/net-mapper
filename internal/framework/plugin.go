@@ -8,14 +8,26 @@ type Plugin[T any] struct {
 	Name    string
 	Kind    string
 	Sources []string
-	Report  string
+	Reports []string
 	Impl    T
 }
+
+type Required int
+
+const (
+	RequireName Required = 1 << iota
+	SupportName
+	RequireKind
+	SupportKind
+	SupportSources
+	RequireReports
+)
 
 type PluginMap[T any] struct {
 	plugins map[string]*Plugin[T]
 	Class   string
 	Factory func(string, Config) (T, error)
+	Require Required
 }
 
 func (pm *PluginMap[T]) Load(spec Config) error {
@@ -23,17 +35,54 @@ func (pm *PluginMap[T]) Load(spec Config) error {
 		pm.plugins = make(map[string]*Plugin[T], 1)
 	}
 
-	name, err := GetArg(spec, "name", "")
-	if err != nil {
-		return err
-	}
-	kind, err := GetArg(spec, "kind", "")
-	if err != nil {
-		return err
-	}
+	var err error
+	var name, kind string
 
+	if pm.Require&RequireName != 0 {
+		name, err = ConsumeArg[string](spec, "name")
+		if err != nil {
+			return err
+		}
+	} else if pm.Require&SupportName != 0 {
+		name, err = ConsumeOptionalArg[string](spec, "name", "")
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			name = fmt.Sprintf("#%d", len(pm.plugins)+1)
+		}
+	} else {
+		name = fmt.Sprintf("#%d", len(pm.plugins)+1)
+	}
 	if _, ok := pm.plugins[name]; ok {
 		return fmt.Errorf("%s %s already registered", pm.Class, name)
+	}
+	if pm.Require&RequireKind != 0 {
+		kind, err = ConsumeArg[string](spec, "kind")
+		if err != nil {
+			return err
+		}
+	} else if pm.Require&SupportKind != 0 {
+		kind, err = ConsumeOptionalArg[string](spec, "kind", "default")
+		if err != nil {
+			return err
+		}
+	}
+
+	var sources, reports []string
+
+	if pm.Require&SupportSources != 0 {
+		sources, err = ConsumeOptionalArg(spec, "source", []string{})
+		if err != nil {
+			return fmt.Errorf("failed to create %s %s : %s", pm.Class, name, err)
+		}
+	}
+
+	if pm.Require&RequireReports != 0 {
+		reports, err = ConsumeOptionalArg(spec, "report", []string{})
+		if err != nil {
+			return fmt.Errorf("failed to create %s %s : %s", pm.Class, name, err)
+		}
 	}
 
 	impl, err := pm.Factory(kind, spec)
@@ -41,26 +90,12 @@ func (pm *PluginMap[T]) Load(spec Config) error {
 		return fmt.Errorf("failed to create %s %s : %s", pm.Class, name, err)
 	}
 
-	sources, err := GetArg(spec, "sources", []string{})
-	if err != nil {
-		return fmt.Errorf("failed to create %s %s : %s", pm.Class, name, err)
-	}
-	report, err := GetArg(spec, "report", "")
-	if err != nil {
-		return fmt.Errorf("failed to create %s %s : %s", pm.Class, name, err)
-	}
-
-	delete(spec, "name")
-	delete(spec, "kind")
-	delete(spec, "sources")
-	delete(spec, "report")
-
 	pm.plugins[name] = &Plugin[T]{
 		Name:    name,
 		Kind:    kind,
 		Impl:    impl,
 		Sources: sources,
-		Report:  report,
+		Reports: reports,
 	}
 
 	return nil

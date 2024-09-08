@@ -21,19 +21,15 @@ func init() {
 
 func newFilePublisher(args framework.Config) (Interface, error) {
 	p := &filePublisher{}
-	err := framework.CheckKeys(args, "filename")
+	err := framework.CheckFields(args, "filename")
 	if err != nil {
 		return nil, err
 	}
 
-	p.fileName, err = framework.GetArg(args, "filename", "")
+	p.fileName, err = framework.ConsumeArg[string](args, "filename")
 	if err != nil {
 		return nil, err
 	}
-	if p.fileName == "" {
-		return nil, fmt.Errorf("filename is required")
-	}
-
 	return p, nil
 }
 

@@ -27,60 +27,128 @@ func IsIdentifier(s string) error {
 
 type Config map[string]any
 
-func Variations(keys ...string) []string {
-	var keysToTry []string
+func Variations(fields ...string) []string {
+	var fieldsToTry []string
 
-	for _, key := range keys {
-		keysToTry = append(keysToTry, key)
-		if strings.HasSuffix(key, "s") {
-			key_without_s := key[:len(key)-1]
-			keysToTry = append(keysToTry, key_without_s)
+	for _, field := range fields {
+		fieldsToTry = append(fieldsToTry, field)
+		if strings.HasSuffix(field, "s") {
+			field_without_s := field[:len(field)-1]
+			fieldsToTry = append(fieldsToTry, field_without_s)
 		} else {
-			key_with_s := key + "s"
-			keysToTry = append(keysToTry, key_with_s)
+			field_with_s := field + "s"
+			fieldsToTry = append(fieldsToTry, field_with_s)
 		}
-		if strings.HasSuffix(key, "y") {
-			key_without_y := key[:len(key)-1] + "ies"
-			keysToTry = append(keysToTry, key_without_y)
+		if strings.HasSuffix(field, "y") {
+			field_without_y := field[:len(field)-1] + "ies"
+			fieldsToTry = append(fieldsToTry, field_without_y)
 		}
 	}
-	return keysToTry
+	return fieldsToTry
 }
 
-func CheckKeys(args Config, keys ...string) error {
-	keyVariations := Variations(keys...)
+func CheckFields(args Config, fields ...string) error {
+	fieldVariations := Variations(fields...)
+	unexpectedfields := make([]string, 0)
 	for k := range args {
-		if !slices.Contains(keyVariations, k) {
-			return fmt.Errorf("unexpected key %s", k)
+		if !slices.Contains(fieldVariations, k) {
+			unexpectedfields = append(unexpectedfields, fmt.Sprintf("%q", k))
 		}
+	}
+	if len(unexpectedfields) > 0 {
+		return fmt.Errorf("unexpected fields: %s", strings.Join(unexpectedfields, ", "))
 	}
 	return nil
 }
 
-func GetArg[T any](cfg Config, key string, defaultValue T) (T, error) {
+// also removes the field from the cfg
+func consumeOptionalArg[T any](cfg Config, field string, defaultValue *T) (*T, error) {
 
-	var keysToTry []string = []string{key}
-	if strings.HasSuffix(key, "s") {
-		key_without_s := key[:len(key)-1]
-		keysToTry = append(keysToTry, key_without_s)
+	var fieldsToTry []string = []string{field}
+	if strings.HasSuffix(field, "s") {
+		field_without_s := field[:len(field)-1]
+		fieldsToTry = append(fieldsToTry, field_without_s)
 	} else {
-		key_with_s := key + "s"
-		keysToTry = append(keysToTry, key_with_s)
+		field_with_s := field + "s"
+		fieldsToTry = append(fieldsToTry, field_with_s)
 	}
-	if strings.HasSuffix(key, "y") {
-		key_without_y := key[:len(key)-1] + "ies"
-		keysToTry = append(keysToTry, key_without_y)
+	if strings.HasSuffix(field, "y") {
+		field_without_y := field[:len(field)-1] + "ies"
+		fieldsToTry = append(fieldsToTry, field_without_y)
 	}
 
-	for _, keyToTry := range keysToTry {
-		if v, ok := cfg[keyToTry]; ok {
+	for _, fieldToTry := range fieldsToTry {
+		if v, ok := cfg[fieldToTry]; ok {
 			tv, ok := v.(T)
 			if !ok {
-				return defaultValue, fmt.Errorf("invalid type %s for key %s, expected %s", reflect.TypeOf(v), keyToTry, reflect.TypeOf(defaultValue))
+				requiredType := reflect.TypeOf(defaultValue).Elem()
+				gotType := reflect.TypeOf(v)
+
+				switch requiredType.Kind() {
+				case reflect.Slice, reflect.Array:
+					elemType := requiredType.Elem()
+					if elemType == gotType {
+						newArray := reflect.MakeSlice(reflect.SliceOf(elemType), 1, 1)
+						newArray.Index(0).Set(reflect.ValueOf(v))
+						arrayImpl := newArray.Interface().(T)
+						delete(cfg, fieldToTry)
+						return &arrayImpl, nil
+					}
+					if gotType.Kind() == reflect.Slice || gotType.Kind() == reflect.Array {
+						count := reflect.ValueOf(v).Len()
+						newArray := reflect.MakeSlice(reflect.SliceOf(elemType), count, count)
+						for i := 0; i < count; i++ {
+							elem := reflect.ValueOf(v).Index(i)
+							if elem.Kind() == reflect.Interface && elem.NumMethod() == 0 {
+								elem = elem.Elem()
+							}
+
+							if !elem.CanConvert(elemType) {
+								err := fmt.Errorf("invalid type %s in list for field %q, expected %s", elem.Type(), fieldToTry, elemType)
+								return defaultValue, err
+							}
+							elem = elem.Convert(elemType)
+							newArray.Index(i).Set(elem)
+						}
+						arrayImpl := newArray.Interface().(T)
+						delete(cfg, fieldToTry)
+						return &arrayImpl, nil
+
+					}
+
+				}
+				err := fmt.Errorf("invalid type %s for field %q, expected %s", gotType, fieldToTry, requiredType)
+				return defaultValue, err
 			}
-			return tv, nil
+			delete(cfg, fieldToTry)
+			return &tv, nil
 		}
 	}
 
 	return defaultValue, nil
+}
+
+func ConsumeOptionalArg[T any](cfg Config, field string, defaultValue T) (T, error) {
+	tp, err := consumeOptionalArg(cfg, field, &defaultValue)
+	if err != nil {
+		return defaultValue, err
+	}
+	if tp == nil {
+		return defaultValue, nil
+	}
+	return *tp, nil
+}
+
+func ConsumeArg[T any](cfg Config, field string) (T, error) {
+	tp, err := consumeOptionalArg[T](cfg, field, nil)
+	if err != nil {
+		var null T
+		return null, err
+	}
+	if tp == nil {
+		var null T
+		return null, fmt.Errorf("missing required field %q", field)
+	}
+
+	return *tp, nil
 }

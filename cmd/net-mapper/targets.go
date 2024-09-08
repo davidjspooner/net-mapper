@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davidjspooner/dsflow/pkg/duration"
+	"github.com/davidjspooner/dsflow/pkg/job"
 	"github.com/davidjspooner/net-mapper/internal/framework"
 	"github.com/davidjspooner/net-mapper/internal/publisher"
 	"github.com/davidjspooner/net-mapper/internal/report"
@@ -38,20 +38,20 @@ var hostsLastChanged = promauto.NewGaugeVec(prometheus.GaugeOpts{
 
 type TargetConfig struct {
 	Name        string             `yaml:"name"`
-	Mapper      string             `yaml:"mapper"`
+	Source      []string           `yaml:"sources"`
 	Report      []framework.Config `yaml:"reports"`
 	Publisher   []framework.Config `yaml:"publishers"`
-	ForgetAfter duration.Value     `yaml:"forget_after"`
+	ForgetAfter job.DurationString `yaml:"forget_after"`
 }
 
 type Target struct {
-	name      string
-	mapper    string
-	report    framework.PluginMap[report.Interface]
-	publisher framework.PluginMap[publisher.Interface]
-	hosts     map[string]time.Time
-	lock      sync.RWMutex
-	content   map[string]string
+	name            string
+	source          []string
+	report          framework.PluginMap[report.Interface]
+	publisher       framework.PluginMap[publisher.Interface]
+	rememberedHosts map[string]time.Time
+	lock            sync.RWMutex
+	content         map[string]string
 }
 
 func NewTarget(config *TargetConfig) (*Target, error) {
@@ -60,47 +60,50 @@ func NewTarget(config *TargetConfig) (*Target, error) {
 	}
 
 	var err error
-	w.mapper = config.Mapper
-	if w.mapper == "" {
-		return nil, fmt.Errorf("job %s has no mapper", config.Name)
+	w.source = config.Source
+	if len(w.source) == 0 {
+		return nil, fmt.Errorf("target %q has no sources", config.Name)
 	}
 
 	if len(config.Report) == 0 {
-		return nil, fmt.Errorf("job %s has no reports", config.Name)
+		return nil, fmt.Errorf("target %q has no reports", config.Name)
 	}
 	w.report = framework.PluginMap[report.Interface]{
 		Class:   "report",
 		Factory: report.NewReportGenerator,
+		Require: framework.RequireName | framework.SupportKind | framework.SupportSources,
 	}
 	err = w.report.LoadAll(config.Report)
 	if err != nil {
-		return nil, fmt.Errorf("job %s, %s", config.Name, err)
+		return nil, fmt.Errorf("target %q, %s", config.Name, err)
 	}
 
 	w.publisher = framework.PluginMap[publisher.Interface]{
 		Class:   "publisher",
 		Factory: publisher.NewPublisher,
+		Require: framework.SupportName | framework.RequireKind | framework.RequireReports,
 	}
 	err = w.publisher.LoadAll(config.Publisher)
 	if err != nil {
-		return nil, fmt.Errorf("job %s, %s", config.Name, err)
+		return nil, fmt.Errorf("target %q, %s", config.Name, err)
 	}
 
 	err = w.publisher.ForEach(func(name string, t *framework.Plugin[publisher.Interface]) error {
-		if t.Report == "" {
-			return fmt.Errorf("publisher %s has no report", name)
+		if len(t.Reports) == 0 {
+			return fmt.Errorf("publisher %q has no report", name)
 		}
-		_, err := w.report.Find(t.Report)
-		if err != nil {
-			return fmt.Errorf("publisher %s, %s", name, err)
+		for _, reportName := range t.Reports {
+			if _, err := w.report.Find(reportName); err != nil {
+				return fmt.Errorf("publisher %q depends on unknown report %s", name, reportName)
+			}
 		}
 		if len(t.Sources) != 0 {
-			return fmt.Errorf("publisher %s should depend on a report not a sources", name)
+			return fmt.Errorf("publisher %q should depend on a report not a sources", name)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("job %s, %s", config.Name, err)
+		return nil, fmt.Errorf("target %q, %s", config.Name, err)
 	}
 
 	w.content = make(map[string]string)
@@ -113,18 +116,18 @@ func (w *Target) updateMemory(hosts source.HostList, memoryDuration time.Duratio
 	now := time.Now()
 	changed := false
 	for _, host := range hosts {
-		if _, ok := w.hosts[host]; !ok {
+		if _, ok := w.rememberedHosts[host]; !ok {
 			hostsDiscovered.WithLabelValues(w.name).Inc()
 			changed = true
 		}
-		w.hosts[host] = now
+		w.rememberedHosts[host] = now
 		log.Printf("discovered %s", host)
 	}
-	hosts = make(source.HostList, 0, len(w.hosts))
-	for host, lastSeen := range w.hosts {
+	hosts = make(source.HostList, 0, len(w.rememberedHosts))
+	for host, lastSeen := range w.rememberedHosts {
 		age := now.Sub(lastSeen)
 		if age > memoryDuration {
-			delete(w.hosts, host)
+			delete(w.rememberedHosts, host)
 			hostsForgotten.WithLabelValues(w.name).Inc()
 			log.Printf("forgetting %s, last seen %v", host, lastSeen)
 			changed = true
@@ -132,7 +135,7 @@ func (w *Target) updateMemory(hosts source.HostList, memoryDuration time.Duratio
 			hosts = append(hosts, host)
 		}
 	}
-	hostsActive.WithLabelValues(w.name).Set(float64(len(w.hosts)))
+	hostsActive.WithLabelValues(w.name).Set(float64(len(w.rememberedHosts)))
 	if changed {
 		hostsLastChanged.WithLabelValues(w.name).Set(float64(now.Unix()))
 	}
@@ -148,13 +151,13 @@ func (w *Target) GenerateReports(ctx context.Context, scannedHosts source.HostLi
 	err := w.report.ForEach(func(name string, t *framework.Plugin[report.Interface]) error {
 		content, err := t.Impl.Generate(ctx, activeHosts)
 		if err != nil {
-			return fmt.Errorf("report %s: %v", name, err)
+			return fmt.Errorf("report %q: %v", name, err)
 		}
 		w.content[name] = content
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("job %s, %s", w.name, err)
+		return fmt.Errorf("target %q: %s", w.name, err)
 	}
 	return nil
 }

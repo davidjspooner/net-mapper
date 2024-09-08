@@ -8,25 +8,25 @@ import (
 	"github.com/davidjspooner/net-mapper/internal/framework"
 )
 
-type Http struct {
-	url    *url.URL
-	metric string
+type httpFilter struct {
+	url     *url.URL
+	metrics []string
 }
 
-var _ Filter = (*Http)(nil)
+var _ Filter = (*httpFilter)(nil)
 
 func init() {
 	Register("http", newHttpFilter)
 }
 
 func newHttpFilter(args framework.Config) (Source, error) {
-	h := &Http{}
+	h := &httpFilter{}
 
-	err := framework.CheckKeys(args, "url", "metric")
+	err := framework.CheckFields(args, "url", "metric")
 	if err != nil {
 		return nil, err
 	}
-	urlString, err := framework.GetArg(args, "url", "")
+	urlString, err := framework.ConsumeArg[string](args, "url")
 	if err != nil {
 		return nil, err
 	}
@@ -44,22 +44,24 @@ func newHttpFilter(args framework.Config) (Source, error) {
 		return nil, fmt.Errorf("url %s has no path", urlString)
 	}
 
-	h.metric, err = framework.GetArg(args, "metric", "")
+	h.metrics, err = framework.ConsumeOptionalArg[[]string](args, "metric", []string{})
 	if err != nil {
 		return nil, err
 	}
-	err = framework.IsIdentifier(h.metric)
-	if err != nil {
-		return nil, fmt.Errorf("metric name %s is invalid: %s", h.metric, err)
+	for _, m := range h.metrics {
+		err = framework.IsIdentifier(m)
+		if err != nil {
+			return nil, fmt.Errorf("metric %q is invalid: %s", m, err)
+		}
 	}
 
 	return h, nil
 }
 
-func (h *Http) Kind() string {
+func (h *httpFilter) Kind() string {
 	return "http"
 }
 
-func (h *Http) Filter(ctx context.Context, input HostList) (HostList, error) {
+func (h *httpFilter) Filter(ctx context.Context, input HostList) (HostList, error) {
 	return nil, fmt.Errorf("http condition not implemented")
 }

@@ -8,13 +8,13 @@ import (
 	"github.com/davidjspooner/net-mapper/internal/framework"
 )
 
-type Snmp struct {
+type snmpFilter struct {
 	community string
 	version   string
-	oid       string
+	oid       []string
 }
 
-var _ Filter = (*Snmp)(nil)
+var _ Filter = (*snmpFilter)(nil)
 
 func ValidateOID(s string) error {
 	if len(s) == 0 {
@@ -34,44 +34,50 @@ func ValidateOID(s string) error {
 	return nil
 }
 
-func NewSnmp(args framework.Config) (Source, error) {
-	s := &Snmp{}
+func init() {
+	Register("snmp", newSnmpFilter)
+}
 
-	err := framework.CheckKeys(args, "community", "version", "oid")
+func newSnmpFilter(args framework.Config) (Source, error) {
+	s := &snmpFilter{}
+
+	err := framework.CheckFields(args, "community", "version", "oid")
 	if err != nil {
 		return nil, err
 	}
 
-	s.community, err = framework.GetArg(args, "community", "")
+	s.community, err = framework.ConsumeOptionalArg(args, "community", "")
 	if err != nil {
 		return nil, err
 	}
 	if s.community == "" {
 		return nil, fmt.Errorf("community is empty")
 	}
-	s.version, err = framework.GetArg(args, "version", "v2c")
+	s.version, err = framework.ConsumeOptionalArg(args, "version", "v2c")
 	if err != nil {
 		return nil, err
 	}
 	if !slices.Contains([]string{"v1", "v2c", "v3"}, s.version) {
 		return nil, fmt.Errorf("invalid version %s ( need to be one of v1,v2c,v3)", s.version)
 	}
-	s.oid, err = framework.GetArg(args, "oid", "")
+	s.oid, err = framework.ConsumeOptionalArg(args, "oid", []string{})
 	if err != nil {
 		return nil, err
 	}
-	err = ValidateOID(s.oid)
-	if err != nil {
-		return nil, fmt.Errorf("oid %s is invalid: %s", s.oid, err)
+	for _, o := range s.oid {
+		err = ValidateOID(o)
+		if err != nil {
+			return nil, fmt.Errorf("oid %q is invalid: %s", o, err)
+		}
 	}
 
 	return s, nil
 }
 
-func (h *Snmp) Filter(ctx context.Context, input HostList) (HostList, error) {
+func (h *snmpFilter) Filter(ctx context.Context, input HostList) (HostList, error) {
 	return nil, fmt.Errorf("snmp condition not implemented")
 }
 
-func (h *Snmp) Kind() string {
+func (h *snmpFilter) Kind() string {
 	return "snmp"
 }

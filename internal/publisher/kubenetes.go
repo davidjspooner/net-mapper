@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"github.com/davidjspooner/net-mapper/internal/framework"
 
+	"github.com/davidjspooner/net-mapper/internal/framework"
 )
 
 type kubernetesPublisher struct {
@@ -21,11 +21,11 @@ func init() {
 func newKubernetesPublisher(args framework.Config) (Interface, error) {
 	p := &kubernetesPublisher{}
 
-	err := framework.CheckKeys(args, "filename")
+	err := framework.CheckFields(args, "filename")
 	if err != nil {
 		return nil, err
 	}
-	p.fileName, err = framework.GetArg(args, "filename", "")
+	p.fileName, err = framework.ConsumeOptionalArg(args, "filename", "")
 	if err != nil {
 		return nil, err
 	}

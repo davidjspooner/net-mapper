@@ -3,6 +3,7 @@ package publisher
 import (
 	"context"
 	"log"
+
 	"github.com/davidjspooner/net-mapper/internal/framework"
 
 	"time"
@@ -22,16 +23,16 @@ func init() {
 func newLogPublisher(args framework.Config) (Interface, error) {
 	p := &logPublisher{}
 
-	err := framework.CheckKeys(args, "report", "prefix", "suffix")
+	err := framework.CheckFields(args, "report", "prefix", "suffix")
 	if err != nil {
 		return nil, err
 	}
 
-	p.prefix, err = framework.GetArg(args, "prefix", "")
+	p.prefix, err = framework.ConsumeOptionalArg(args, "prefix", "")
 	if err != nil {
 		return nil, err
 	}
-	p.suffix, err = framework.GetArg(args, "suffix", "")
+	p.suffix, err = framework.ConsumeOptionalArg(args, "suffix", "")
 	if err != nil {
 		return nil, err
 	}

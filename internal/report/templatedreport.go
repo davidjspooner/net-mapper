@@ -18,7 +18,7 @@ type templatedReport struct {
 
 func init() {
 	Register("template", newTemplatedReport)
-	Register("", newTemplatedReport)
+	Register("default", newTemplatedReport)
 }
 
 func newTemplatedReport(args framework.Config) (Interface, error) {
@@ -26,12 +26,12 @@ func newTemplatedReport(args framework.Config) (Interface, error) {
 
 	r := &templatedReport{}
 
-	filename, err := framework.GetArg(args, "template_file", "")
+	filename, err := framework.ConsumeOptionalArg(args, "template_file", "")
 	if err != nil {
 		return nil, err
 	}
 
-	templateText, err := framework.GetArg(args, "template_inline", "")
+	templateText, err := framework.ConsumeOptionalArg(args, "template_inline", "")
 	if err != nil {
 		return nil, err
 	}

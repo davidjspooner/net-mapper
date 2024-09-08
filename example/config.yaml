@@ -3,7 +3,7 @@ memory_duration: 240h
 
 sources:
   - name: management_vlans
-    kind: ip
+    kind: static
     cidr:
       - "192.168.3.0/24"
   - name: nodexporters
@@ -11,8 +11,11 @@ sources:
     sources:
       - management_vlans
     url: "http://TBD:9100/metrics"
+    metric: "node_cpu_seconds_total"
   - name: public_snmp
     kind: snmp
+    sources:
+      - management_vlans
     community: "public"
     version: v2c
 targets:
@@ -20,19 +23,21 @@ targets:
     sources: 
       - nodeexporters
     reports:
-      - template_file: nodeexporter.tmpl
+      - name: probe
+        template_file: probe-nodeexporter.yaml.tmpl
         namespace: "observability"
     publishers:
-      - type: log
+      - kind: log
+        report: probe
   - name: snmp
-    scanners: 
+    sources: 
       - management_vlans
     reports:
-      - name: snmpexporter
-        template_file: probe-snmpexporter.tmpl
+      - name: probe
+        template_file: probe-snmpexporter.yaml.tmpl
         namespace: "observability"
         community: "public"
         version: v2c
     publishers:
-      - type: log
-        report: snmpexporter
+      - kind: log
+        report: probe
