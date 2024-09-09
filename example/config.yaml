@@ -6,16 +6,20 @@ sources:
     kind: static
     cidr:
       - "192.168.3.0/24"
-  - name: nodexporters
-    kind: http
+  - name: management_pingable
+    kind: ping
     sources:
       - management_vlans
+  - name: nodeexporters
+    kind: http
+    sources:
+      - management_pingable
     url: "http://TBD:9100/metrics"
     metric: "node_cpu_seconds_total"
   - name: public_snmp
     kind: snmp
     sources:
-      - management_vlans
+      - management_pingable
     community: "public"
     version: v2c
 targets:
@@ -31,7 +35,7 @@ targets:
         report: probe
   - name: snmp
     sources: 
-      - management_vlans
+      - public_snmp
     reports:
       - name: probe
         template_file: probe-snmpexporter.yaml.tmpl

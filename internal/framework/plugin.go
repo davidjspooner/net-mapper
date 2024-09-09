@@ -5,11 +5,15 @@ import (
 )
 
 type Plugin[T any] struct {
-	Name    string
+	id      string
 	Kind    string
 	Sources []string
 	Reports []string
 	Impl    T
+}
+
+func (p *Plugin[T]) ID() string {
+	return p.id
 }
 
 type Required int
@@ -30,7 +34,7 @@ type PluginMap[T any] struct {
 	Require Required
 }
 
-func (pm *PluginMap[T]) Load(spec Config) error {
+func (pm *PluginMap[T]) Load(prefix string, spec Config) error {
 	if pm.plugins == nil {
 		pm.plugins = make(map[string]*Plugin[T], 1)
 	}
@@ -91,7 +95,7 @@ func (pm *PluginMap[T]) Load(spec Config) error {
 	}
 
 	pm.plugins[name] = &Plugin[T]{
-		Name:    name,
+		id:      prefix + "." + name,
 		Kind:    kind,
 		Impl:    impl,
 		Sources: sources,
@@ -101,9 +105,9 @@ func (pm *PluginMap[T]) Load(spec Config) error {
 	return nil
 }
 
-func (pm *PluginMap[T]) LoadAll(specs []Config) error {
+func (pm *PluginMap[T]) LoadAll(prefix string, specs []Config) error {
 	for _, spec := range specs {
-		if err := pm.Load(spec); err != nil {
+		if err := pm.Load(prefix, spec); err != nil {
 			return err
 		}
 	}
