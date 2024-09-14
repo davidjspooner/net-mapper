@@ -1,25 +1,32 @@
-scan_frequency: 60m
+scan_frequency: 30m
 memory_duration: 240h
 
 sources:
-  - name: management_vlans
+  - name: vlans
     kind: static
     cidr:
       - "192.168.3.0/24"
-  - name: management_pingable
-    kind: ping
+      - "192.168.4.0/24"
+  - name: pingable
+    kind: ping_filter
     sources:
-      - management_vlans
+      - vlans
   - name: nodeexporters
-    kind: http
+    kind: prom_exporter_filter
     sources:
-      - management_pingable
-    url: "http://TBD:9100/metrics"
-    metric: "node_cpu_seconds_total"
+      - pingable
+    url: http://TBD:9100/metrics
+    metric: node_uname_info
+  - name: dsbox
+    kind: prom_exporter_filter
+    sources:
+      - pingable
+    url: http://TBD:3000/metrics
+    metric: dsbox_info
   - name: public_snmp
-    kind: snmp
+    kind: snmp_filter
     sources:
-      - management_pingable
+      - pingable
     community: "public"
     version: v2c
 targets:
@@ -33,15 +40,25 @@ targets:
     publishers:
       - kind: log
         report: probe
-  - name: snmp
+  - name: dsbox
     sources: 
-      - public_snmp
+      - dsbox
     reports:
       - name: probe
-        template_file: probe-snmpexporter.yaml.tmpl
+        template_file: probe-dsbox.yaml.tmpl
         namespace: "observability"
-        community: "public"
-        version: v2c
     publishers:
       - kind: log
         report: probe
+#  - name: snmp
+#    sources: 
+#      - public_snmp
+#    reports:
+#      - name: probe
+#        template_file: probe-snmpexporter.yaml.tmpl
+#        namespace: "observability"
+#        community: "public"
+#        version: v2c
+#    publishers:
+#      - kind: log
+#        report: probe

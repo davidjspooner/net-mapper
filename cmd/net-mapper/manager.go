@@ -11,6 +11,7 @@ import (
 
 	"github.com/davidjspooner/dsflow/pkg/job"
 	"github.com/davidjspooner/net-mapper/internal/framework"
+	"github.com/davidjspooner/net-mapper/internal/genericutils"
 	"github.com/davidjspooner/net-mapper/internal/publisher"
 	"github.com/davidjspooner/net-mapper/internal/report"
 	"github.com/davidjspooner/net-mapper/internal/source"
@@ -100,7 +101,6 @@ func (m *Manager) ReloadConfig(ctx context.Context, configPath string) error {
 					return fmt.Errorf("filter %s (%s) depends on unknown source %s", name, filter.Kind(), dep)
 				}
 			}
-			//TODO create dependancy tree
 		}
 		if isRoot && !isFilter {
 			if len(p.Sources) != 0 {
@@ -209,12 +209,14 @@ func (m *Manager) backgroundLoop(ctx context.Context, scanFrequency time.Duratio
 			log.Printf("Scan took %s longer than %s\n", -sleepTime, scanFrequency)
 			sleepTime = 1
 		}
+		sleepTime = genericutils.Max(sleepTime, time.Minute)
 
-		log.Printf("Sleeping for %s\n", scanFrequency)
+		log.Printf("Sleeping for %s\n", sleepTime)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(sleepTime):
+			lastStarted = time.Now()
 			m.backgroundRun(ctx, nodes)
 		}
 	}

@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +26,7 @@ type httpFilter struct {
 var _ Filter = (*httpFilter)(nil)
 
 func init() {
-	Register("http", newHttpFilter)
+	Register("prom_exporter_filter", newHttpFilter)
 }
 
 func newHttpFilter(args framework.Config) (Source, error) {
@@ -71,15 +73,20 @@ func newHttpFilter(args framework.Config) (Source, error) {
 }
 
 func (h *httpFilter) Kind() string {
-	return "http"
+	return "prom_exporter_filter"
 }
 
-func (h *httpFilter) responceContainsMetric(r io.ReadCloser) bool {
+func (h *httpFilter) responceContainsMetric(r io.ReadCloser, u *url.URL) bool {
 	defer r.Close()
 	//read the lines and look for the metrics
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
+		first_word := strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == '{' })[0]
+		if slices.Contains(h.metrics, first_word) {
+			log.Printf("Found metric %q in %s\n", first_word, u.String())
+			return true
+		}
 		_ = line
 	}
 	return false
@@ -99,7 +106,7 @@ func (h *httpFilter) testHost(ctx context.Context, u *url.URL) error {
 		resp.Body.Close()
 		return err
 	}
-	if h.responceContainsMetric(resp.Body) {
+	if h.responceContainsMetric(resp.Body, u) {
 		return nil
 	}
 	return fmt.Errorf("no matching metrics found")
@@ -123,7 +130,6 @@ func (h *httpFilter) Filter(ctx context.Context, input HostList) (HostList, erro
 		if err != nil {
 			return nil
 		}
-		log.Default().Printf("Success %s = %s\n", u.String(), err)
 		lock.Lock()
 		defer lock.Unlock()
 		output = append(output, host)

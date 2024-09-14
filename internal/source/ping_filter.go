@@ -19,7 +19,7 @@ type pingFilter struct {
 var _ Filter = (*pingFilter)(nil)
 
 func init() {
-	Register("ping", newPingFilter)
+	Register("ping_filter", newPingFilter)
 }
 
 func newPingFilter(args framework.Config) (Source, error) {
@@ -123,7 +123,7 @@ func (h *pingFilter) pingShotgun(ctx context.Context, input HostList, count int,
 		if err != nil {
 			return nil
 		}
-		log.Printf("Success %s \n", host)
+		log.Printf("Ping reply from %s \n", host)
 		lock.Lock()
 		defer lock.Unlock()
 		output = append(output, host)
@@ -146,5 +146,5 @@ func (h *pingFilter) Filter(ctx context.Context, input HostList) (HostList, erro
 }
 
 func (h *pingFilter) Kind() string {
-	return "ping"
+	return "ping_filter"
 }

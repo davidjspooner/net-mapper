@@ -35,7 +35,7 @@ func ValidateOID(s string) error {
 }
 
 func init() {
-	Register("snmp", newSnmpFilter)
+	Register("snmp_filter", newSnmpFilter)
 }
 
 func newSnmpFilter(args framework.Config) (Source, error) {
@@ -79,5 +79,5 @@ func (h *snmpFilter) Filter(ctx context.Context, input HostList) (HostList, erro
 }
 
 func (h *snmpFilter) Kind() string {
-	return "snmp"
+	return "snmp_filter"
 }
