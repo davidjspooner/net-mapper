@@ -3,41 +3,54 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/davidjspooner/net-mapper/internal/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/internal/asn1/asn1mib"
 	"github.com/davidjspooner/net-mapper/internal/snmp"
 )
 
-var sampleSnmpFrame = []byte{
-	0x30, 0x2c,
-	0x02, 0x01, 0x00,
-	0x04, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61, 0x74, 0x65,
-	0xa0, 0x1e,
-	0x02, 0x01, 0x01,
-	0x02, 0x01, 0x00,
-	0x02, 0x01, 0x00,
-	0x30, 0x13,
-	0x30, 0x11,
-	0x06, 0x0d, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x94, 0x78, 0x01, 0x02, 0x07, 0x03, 0x02, 0x00,
-	0x05, 0x00,
+func ReadAllMibs(dirname string) error {
+
+	mibDrectory := asn1mib.NewDirectory()
+
+	files, err := os.ReadDir(dirname)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		nameL := strings.ToLower(file.Name())
+		if strings.HasSuffix(nameL, ".mib") {
+			err := mibDrectory.AddFile(dirname + file.Name())
+			if err != nil {
+				return err
+			}
+		}
+	}
+	err = mibDrectory.CreateIndex()
+	if err != nil {
+		errors := err.(asn1core.ErrorList)
+		for _, e := range errors {
+			fmt.Printf("Error: %v\n", e)
+		}
+		return err
+	}
+	return nil
 }
 
-func main() {
-	//target := "192.168.3.24"
+func DecodeDump(filename string) error {
 	community := "public"
 	//oid := asn1.ObjectIdentifier{1, 3, 6, 1, 2, 1, 1, 1, 0} // Replace with your OID
 
 	protocol, err := snmp.NewProtocol(snmp.WithV2(community))
 	if err != nil {
 		fmt.Printf("Error creating SNMP protocol: %v\n", err)
-		return
+		return err
 	}
-
-	message, err := protocol.DecodeFrame(sampleSnmpFrame)
-	if err != nil {
-		fmt.Printf("Error unmarshaling SNMP response: %v\n", err)
-	}
-	_ = message
 
 	err = PlaybackIpFramesFromFile("/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", IPFrameHandleFunc(func(frame *IPFrame) error {
 		if frame.IsFragment {
@@ -87,6 +100,12 @@ func main() {
 		}
 		return nil
 	}))
+	return err
+}
+
+func main() {
+
+	err := ReadAllMibs("/mnt/homelab-atom/static/mib/")
 
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
