@@ -30,43 +30,18 @@ func (o *oidReader) Read(name string, d *Directory, s *Scanner) (Definition, err
 	if err != nil {
 		return nil, err
 	}
-	_ = meta //discard for now
-	err = s.PopExpected("{")
+	_ = meta
+	tokens, err := s.PopBlock("{", "}")
 	if err != nil {
 		return nil, err
 	}
-	valuePosition := s.LookAhead(0).source
-	tokens, err := s.PopUntil("}")
-	if err != nil {
-		return nil, err
-	}
-	tokens = tokens[1 : len(tokens)-1]
-	if len(tokens) == 0 {
+	valuePosition := tokens.Source()
+	if tokens.IsEOF() {
 		return nil, valuePosition.Errorf("empty OID definition")
 	}
 	var oid asn1go.OID
-	firstToken := tokens[0]
-	switch firstToken.Type() {
-	case IDENT:
-		defintion, ok := d.definitions[tokens[0].String()]
-		if !ok {
-			return nil, valuePosition.Errorf("unknown definition %s", tokens[0].String())
-		}
-		oidDefintion, ok := defintion.(OIDValue)
-		if !ok {
-			return nil, valuePosition.Errorf("definition %s is not an OID", tokens[0].String())
-		}
-		oid = oidDefintion.OID()
-	case NUMBER:
-		oid, err = asn1go.ParseOID(firstToken.String(), d.OIDLookup)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, valuePosition.Errorf("unexpected token %s", tokens[0].String())
-	}
-	for i := 1; i < len(tokens); i++ {
-		token := tokens[i]
+	for i := 0; i < tokens.Length(); i++ {
+		token, _ := tokens.LookAhead(i)
 		switch token.Type() {
 		case NUMBER:
 			tail, err := asn1go.ParseOID(token.String(), d.OIDLookup)
@@ -75,21 +50,26 @@ func (o *oidReader) Read(name string, d *Directory, s *Scanner) (Definition, err
 			}
 			oid = append(oid, tail...)
 		case IDENT:
-			if len(tokens) > i+3 && tokens[i+1].TokenIs("(") && tokens[i+3].TokenIs(")") {
-				n, err := strconv.Atoi(tokens[i+2].String())
+
+			peek1, _ := tokens.LookAhead(i + 1)
+			peek2, _ := tokens.LookAhead(i + 2)
+			peek3, _ := tokens.LookAhead(i + 3)
+
+			if tokens.Length() > i+3 && peek1.IsText("(") && peek3.IsText(")") {
+				n, err := strconv.Atoi(peek2.String())
 				if err != nil {
-					return nil, tokens[i+2].WrapError(err)
+					return nil, peek2.WrapError(err)
 				}
 				oid = append(oid, n)
 				i += 3
 			} else {
 				ref, ok := d.definitions[token.String()]
 				if !ok {
-					return nil, token.source.Errorf("unknown reference %s", token.String())
+					return nil, token.Errorf("unknown reference %s", token.String())
 				}
 				oidDefintion, ok := ref.(OIDValue)
 				if !ok {
-					return nil, token.source.Errorf("reference %s is not an OID", token.String())
+					return nil, token.Errorf("reference %s is not an OID", token.String())
 				}
 				oid = nil
 				oid = append(oid, oidDefintion.OID()...)
@@ -99,7 +79,7 @@ func (o *oidReader) Read(name string, d *Directory, s *Scanner) (Definition, err
 		}
 	}
 
-	return &oidDefintion{oid: oid, source: firstToken.source}, nil
+	return &oidDefintion{oid: oid, source: *valuePosition}, nil
 }
 
 func (reader *oidReader) Source() Position {

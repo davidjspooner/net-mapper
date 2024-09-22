@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 
 	"github.com/davidjspooner/net-mapper/internal/asn1/asn1core"
 	"golang.org/x/exp/constraints"
@@ -41,26 +40,6 @@ func init() {
 	}
 }
 
-type Position struct {
-	Filename string
-	Line     int
-	Column   int
-}
-
-func (p *Position) String() string {
-	sb := strings.Builder{}
-	if p.Filename != "" {
-		sb.WriteString(p.Filename)
-	}
-	if p.Line > 0 || p.Column > 0 {
-		if p.Filename != "" {
-			sb.WriteString(" ")
-		}
-		sb.WriteString(fmt.Sprintf("[ln %d col %d]", p.Line, p.Column))
-	}
-	return sb.String()
-}
-
 type ScannerError struct {
 	Position Position
 	Err      error
@@ -92,6 +71,8 @@ type Scanner struct {
 	skip         map[TokenType]bool
 }
 
+var _ TokenQueue = &Scanner{}
+
 type ScannerOption func(scanner *Scanner) error
 
 func WithSkip(tokenTypes ...TokenType) ScannerOption {
@@ -108,6 +89,7 @@ func WithSkip(tokenTypes ...TokenType) ScannerOption {
 func WithFilename(filename string) ScannerOption {
 	return func(s *Scanner) error {
 		s.nextPosition.Filename = filename
+		s.queue.Filename = filename
 		return nil
 	}
 }
@@ -167,99 +149,100 @@ func Max[T constraints.Ordered](a ...T) T {
 
 func (s *Scanner) refillQueue(desired int) int {
 	desired = Max(desired, 16)
-	for len(s.queue) < desired {
+	for len(s.queue.elements) < desired {
 		pos := s.nextPosition
 		if !s.inner.Scan() {
 			break
 		}
 		tok := Token{
-			text:   s.inner.Text(),
-			source: pos,
+			value:    s.inner.Text(),
+			position: pos,
 		}
 		if s.skip[tok.Type()] {
 			continue
 		}
 
-		last := len(s.queue) - 1
+		last := len(s.queue.elements) - 1
 		merged := false
 		if last >= 0 {
-			candidate := s.queue[last].String() + " " + tok.String()
+			candidate := s.queue.elements[last].String() + " " + tok.String()
 			if slices.Contains(specialTokens, candidate) {
-				s.queue[last].text = candidate
+				s.queue.elements[last].value = candidate
 				merged = true
 			}
 		}
 		if !merged {
-			if tok.text == "NOTATION" {
-				print("NOTATION!!!!!")
-			}
-			s.queue = append(s.queue, tok)
+			s.queue.AppendTokens(&tok)
 		}
 	}
 
-	return len(s.queue)
+	return len(s.queue.elements)
 }
-func (s *Scanner) Scan() bool {
-	if len(s.queue) > 0 {
-		//pop the first token off the queue
-		s.queue.RemoveHead()
-	}
-	s.refillQueue(16)
-	for len(s.queue) > 0 {
-		tType := s.queue[0].Type()
-		if !s.skip[tType] {
-			break
+
+/*
+	func (s *Scanner) Scan() bool {
+		if len(s.queue) > 0 {
+			//pop the first token off the queue
+			s.queue.Pop()
 		}
-		//pop the first token off the queue
-		s.queue.RemoveHead()
 		s.refillQueue(16)
-	}
-	if len(s.queue) != 0 {
-		return true
-	}
-	return false
-}
-func (s *Scanner) Pop() Token {
-	token := s.LookAhead(0)
-	s.queue.DeleteIndex(0)
-	return token
-}
-func (s *Scanner) LookAhead(n int) Token {
-	s.refillQueue(n + 2)
-	if len(s.queue) < n {
-		return Token{text: ""}
-	}
-	return s.queue[n]
-}
-
-func (s *Scanner) TokenIs(text string) bool {
-	if len(s.queue) == 0 {
+		for len(s.queue) > 0 {
+			tType := s.queue[0].Type()
+			if !s.skip[tType] {
+				break
+			}
+			//pop the first token off the queue
+			s.queue.Pop()
+			s.refillQueue(16)
+		}
+		if len(s.queue) != 0 {
+			return true
+		}
 		return false
 	}
-	return s.queue[0].TokenIs(text)
+*/
+func (s *Scanner) Pop() (*Token, error) {
+	tok, err := s.LookAhead(0)
+	if err == nil {
+		s.queue.RemoveIndex(0)
+	}
+	return tok, err
+}
+func (s *Scanner) LookAhead(n int) (*Token, error) {
+	s.refillQueue(n + 2)
+	return s.queue.LookAhead(n)
+}
+
+func (s *Scanner) IsText(text string) bool {
+	if s.refillQueue(1) == 0 {
+		return false
+	}
+	return s.queue.elements[0].IsText(text)
 }
 
 func (s *Scanner) Err() error {
 	return s.inner.Err()
 }
 
-func (s *Scanner) PopIdent() (Token, error) {
-	actual := s.LookAhead(0)
-	if actual.Type() != IDENT {
-		return Token{}, actual.WrapError(asn1core.NewUnexpectedError(IDENT, actual.Type(), "token type"))
+func (s *Scanner) PopType(tType TokenType) (*Token, error) {
+	actual, err := s.Pop()
+	if err == nil {
+		if actual.Type() != tType {
+			err = actual.WrapError(asn1core.NewUnexpectedError(tType, actual.Type(), "token type"))
+		}
 	}
-	s.Scan()
-	return actual, nil
+	return actual, err
 }
 
 func (s *Scanner) PopExpected(expectedTexts ...string) error {
-	for _, expectedText := range expectedTexts {
-		actual := s.LookAhead(0)
+	for n, expectedText := range expectedTexts {
+		s.refillQueue(len(expectedTexts) - n)
+		actual, err := s.Pop()
+		if err != nil {
+			return err
+		}
 		if actual.String() != expectedText {
 			return asn1core.NewUnexpectedError(expectedText, actual.String(), "token")
-		}
-		if !s.Scan() {
-			return s.Err()
 		}
 	}
 	return nil
@@ -433,66 +416,63 @@ func ExtractString(original string) (string, error) {
 	return output, nil
 }
 
-func (s *Scanner) ScanAllTokens() (TokenList, error) {
-	tokens := TokenList{s.LookAhead(0)}
-	for s.Scan() {
-		tokens = append(tokens, s.LookAhead(0))
-	}
-	return tokens, s.Err()
-}
-
-func (s *Scanner) PopUntil(text string) (TokenList, error) {
-	startPosition := *s.position()
-	tokens := TokenList{
-		s.LookAhead(0),
+func (s *Scanner) PopUntil(text string) (*TokenList, error) {
+	tokens := &TokenList{
+		Filename: s.nextPosition.Filename,
 	}
 	for {
-		tok := s.Pop()
-		if tok.TokenIs("") {
-			break
+		tok, err := s.Pop()
+		if err != nil {
+			return nil, err
 		}
-		tokens = append(tokens, tok)
-		if tok.TokenIs(text) {
+		if tok.IsText(text) {
 			return tokens, nil
 		}
+		tokens.AppendTokens(tok)
 	}
-	err := s.Err()
-	if err == nil {
-		err = startPosition.Errorf("looking for %q but reached end of file", text)
-	}
-	return nil, startPosition.WrapError(err)
-}
-
-func (s *Scanner) position() *Position {
-	if len(s.queue) > 0 {
-		return &s.queue[0].source
-	}
-	return &s.nextPosition
 }
 
 func (s *Scanner) Errorf(format string, args ...interface{}) error {
-	return s.position().Errorf(format, args...)
+	return s.Source().Errorf(format, args...)
 }
 func (s *Scanner) WrapError(err error) error {
-	return s.position().WrapError(err)
+	return s.Source().WrapError(err)
 }
 
-func (s *Scanner) PopBlock(level int, start, end string) (TokenList, error) {
-	block := TokenList{}
+func (s *Scanner) PopBlock(start, end string) (*TokenList, error) {
+	level := 0
+	block := &TokenList{Filename: s.nextPosition.Filename}
+	head, err := s.LookAhead(0)
+	if err != nil {
+		return nil, err
+	}
+	if !head.IsText(start) {
+		return nil, head.Errorf("expected %s", start)
+	}
 	for {
-		tok := s.Pop()
-		block = append(block, tok)
-		if tok.String() == start {
+		tok, err := s.Pop()
+		if err != nil {
+			return nil, err
+		}
+		block.AppendTokens(tok)
+		if tok.IsText(start) {
 			level++
 		} else if tok.String() == end {
 			level--
 			if level == 0 {
-				break
+				block.elements = block.elements[1 : len(block.elements)-1]
+				return block, nil
 			}
 		}
 	}
-	if level != 0 {
-		return nil, s.Errorf("unterminated %q", start)
-	}
-	return block, nil
+}
+
+func (s *Scanner) Source() *Position {
+	s.refillQueue(1)
+	return s.queue.Source()
+}
+
+func (s *Scanner) IsEOF() bool {
+	s.refillQueue(1)
+	return s.queue.IsEOF()
 }

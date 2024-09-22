@@ -10,6 +10,7 @@ const (
 	NUMBER
 	STRING
 	PUNCT
+	EOF
 )
 
 func (t TokenType) String() string {
@@ -26,38 +27,57 @@ func (t TokenType) String() string {
 		return "STRING"
 	case PUNCT:
 		return "PUNCT"
+	case EOF:
+		return "EOF"
 	}
 	return "UNKNOWN"
 }
 
 type Token struct {
-	text   string
-	source Position
+	value    string
+	position Position
 }
 
-func (t Token) String() string {
-	return t.text
+func EOFToken(filename string) *Token {
+	return &Token{position: *EOFPosition(filename)}
 }
 
-func (t Token) TokenIs(s string) bool {
-	return t.text == s
+type TokenQueue interface {
+	Pop() (*Token, error)
+	LookAhead(n int) (*Token, error)
+	PopBlock(start, end string) (*TokenList, error) //dont include start and end in list
+	PopUntil(end string) (*TokenList, error)        //dont include end in list
+	PopExpected(elems ...string) error
+	IsEOF() bool
+	Source() *Position
 }
 
-func (t Token) Source() Position {
-	return t.source
+func (t *Token) String() string {
+	return t.value
+}
+
+func (t *Token) IsText(s string) bool {
+	return t.value == s
+}
+
+func (t Token) Source() *Position {
+	return &t.position
 }
 
 func (t Token) Type() TokenType {
-	if t.text == "" {
+	if t.position.IsEOF() {
+		return EOF
+	}
+	if t.value == "" {
 		return UNKNOWN
 	}
-	c := t.text[0]
+	c := t.value[0]
 	switch c {
 	case ' ', '\t', '\n', '\r':
 		return WHITESPACE
 	case '-':
-		if len(t.text) > 1 {
-			if t.text[1] == '-' {
+		if len(t.value) > 1 {
+			if t.value[1] == '-' {
 				return COMMENT
 			}
 			return NUMBER
@@ -79,9 +99,13 @@ func (t Token) Type() TokenType {
 }
 
 func (t *Token) WrapError(err error) error {
-	return t.source.WrapError(err)
+	return t.position.WrapError(err)
 }
 
 func (t *Token) Errorf(format string, args ...interface{}) error {
-	return t.source.Errorf(format, args...)
+	return t.position.Errorf(format, args...)
+}
+
+func (t *Token) IsEOF() bool {
+	return t.position.IsEOF()
 }

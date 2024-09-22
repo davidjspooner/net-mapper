@@ -29,96 +29,89 @@ func (td *simpleTypeDefintion) Source() Position {
 	return td.source
 }
 
-func (u *simpleTypeDefintion) ReadDefinition(name string, d *Directory, s *Scanner) (Definition, error) {
+func (u *simpleTypeDefintion) Read(name string, d *Directory, s *Scanner) (Definition, error) {
 	return nil, u.source.WrapError(asn1core.NewUnimplementedError("simple type definition %s", name).MaybeLater())
 }
 
 // -----------------------
 
-type simpleTypeDefintionReader struct {
-}
-
 var closer = map[string]string{"{": "}", "(": ")", "[": "]"}
 
-func (u *simpleTypeDefintionReader) ReadDefinition(name string, d *Directory, s *Scanner) (Definition, error) {
-	pos := s.LookAhead(0).source
+func (td *simpleTypeDefintion) Initialize(name string, d *Directory, s *Scanner) error {
 	meta, err := s.PopUntil("::=")
-	_ = meta
 	if err != nil {
-		return nil, pos.Errorf("unterminated definition %q", name)
+		return meta.Source().Errorf("unterminated definition %q", name)
 	}
-	ident := s.LookAhead(0)
-	td := &simpleTypeDefintion{source: ident.source}
+	_ = meta
+	ident, err := s.LookAhead(0)
+	if err != nil {
+		return err
+	}
+	td.source = *meta.Source()
 
-	if ident.TokenIs("[") {
-		block, err := s.PopBlock(1, "[", "]")
+	if ident.IsText("[") {
+		block, err := s.PopBlock("[", "]")
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if len(block) != 3 {
-			return nil, block[0].source.Errorf("unexpected block %s", block)
+		if block.Length() != 2 {
+			return block.Source().Errorf("unexpected block %s", block)
 		}
-		class, err := asn1core.ParseClass(block[0].String())
+		classTok, _ := block.LookAhead(0)
+		class, err := asn1core.ParseClass(classTok.String())
 		if err != nil {
-			return nil, block[0].WrapError(err)
+			return classTok.WrapError(err)
 		}
 		td.params.Class = asn1binary.PtrToClass(class)
-		tag, err := strconv.Atoi(block[1].String())
+		tagTok, _ := block.LookAhead(1)
+		tag, err := strconv.Atoi(tagTok.String())
 		td.params.Tag = asn1binary.PtrToTag(asn1core.Tag(tag))
 		if err != nil {
-			return nil, block[1].WrapError(err)
+			return tagTok.WrapError(err)
 		}
+
 		//TODO set the tags?
-		peek := s.LookAhead(1)
-		if peek.TokenIs("IMPLICIT") {
-			s.Scan()
+		ident, err = s.LookAhead(0)
+		if err != nil {
+			return err
+		}
+		if ident.IsText("IMPLICIT") {
+			s.Pop()
 			td.implicit = true
 		}
-		ident, err = s.PopIdent()
-		if err != nil {
-			return nil, err
-		}
+	}
+	ident, err = s.PopType(IDENT)
+	if err != nil {
+		return err
 	}
 
 	td.typeClass = ident.String()
 	switch ident.String() {
 	case Octet_String, "INTEGER", "CHOICE", "SEQUENCE", "SEQUENCE OF", "SET", "SET OF":
-		peek := s.LookAhead(1)
+		peek, err := s.LookAhead(0)
+		if err != nil {
+			return err
+		}
 		open := peek.String()
 		close, isBracket := closer[open]
 		if isBracket {
-			constraint, err := s.PopBlock(0, open, close)
+			constraint, err := s.PopBlock(open, close)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			td.constraint = constraint[1 : len(constraint)-1] //strip the ")"
-			return td, nil
+			td.constraint = *constraint
 		}
-		return td, nil
+		return nil
 	case Object_Identifier:
-		peek := s.LookAhead(1)
-		if peek.Type() == IDENT {
-			return td, nil
-		}
-		return nil, td.source.WrapError(asn1core.NewUnimplementedError("Object_Identifier type definition").MaybeLater())
-	default:
-		reader, ok := d.definitions[ident.String()]
-		if !ok {
-			return nil, td.source.WrapError(asn1core.NewUnimplementedError("unknown type definition %s", ident.String()).MaybeLater())
-		}
-		defReader, ok := reader.(TypeDefinition)
-		if !ok {
-			return nil, td.source.WrapError(asn1core.NewUnimplementedError("Type definition %s is not a reader", ident.String()).MaybeLater())
-		}
-		def, err := defReader.Read(name, d, s)
+		peek, err := s.LookAhead(0)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return def, nil
+		if peek.Type() == IDENT {
+			return nil
+		}
+		return td.source.WrapError(asn1core.NewUnimplementedError("Object_Identifier type definition").MaybeLater())
+	default:
+		return td.source.WrapError(asn1core.NewUnimplementedError("simple type definition %s", ident.String()).MaybeLater())
 	}
-
-}
-
-func (reader *simpleTypeDefintionReader) Source() Position {
-	return builtInPosition
 }

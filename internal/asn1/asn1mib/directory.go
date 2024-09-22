@@ -10,7 +10,7 @@ import (
 
 type mibFile struct {
 	filename    string
-	mibname     Token
+	mibname     string
 	err         error
 	exports     []string
 	definitions map[string]Definition
@@ -25,8 +25,9 @@ func NewDirectory() *Directory {
 	d := &Directory{
 		definitions: make(map[string]Definition),
 	}
+	d.definitions[""] = &Definer[*simpleTypeDefintion]{}
 	d.definitions["OBJECT IDENTIFIER"] = &oidReader{}
-	d.definitions["MACRO"] = &macroDefintionReader{}
+	d.definitions["MACRO"] = &Definer[*macroDefintion]{}
 	d.definitions["iso"] = &oidDefintion{
 		oid:    []int{1},
 		source: builtInPosition,
@@ -87,7 +88,7 @@ func (d *Directory) tryReadMib(mf *mibFile) error {
 	if err != nil {
 		return err
 	}
-	for s.Scan() {
+	for !s.IsEOF() {
 		err = d.readDefintion(mf, s)
 		if err != nil {
 			return err
@@ -102,7 +103,7 @@ func (d *Directory) tryReadMib(mf *mibFile) error {
 		for _, name := range mf.exports {
 			def, ok := mf.definitions[name]
 			if !ok {
-				return s.position().Errorf("unknown export %s", name)
+				return s.Errorf("unknown export %s", name)
 			}
 			d.definitions[name] = def
 		}
@@ -112,18 +113,23 @@ func (d *Directory) tryReadMib(mf *mibFile) error {
 }
 
 func (d *Directory) readDefintion(mf *mibFile, s *Scanner) error {
-	ident := s.LookAhead(0)
-	position := ident.Source()
-	s.Scan()
-	err := s.PopExpected("DEFINITIONS", "::=", "BEGIN")
+	ident, err := s.Pop()
 	if err != nil {
 		return err
 	}
-	mf.mibname = ident
+	err = s.PopExpected("DEFINITIONS", "::=", "BEGIN")
+	if err != nil {
+		return err
+	}
+	mf.mibname = ident.String()
 	for {
-		tok := s.LookAhead(0)
+		tok, err := s.LookAhead(0)
+		if err != nil {
+			return err
+		}
 		switch tok.String() {
 		case "END", "": //be generous with the end of file
+			s.Pop()
 			return nil
 		case "IMPORTS":
 			err = d.readImports(s)
@@ -135,47 +141,44 @@ func (d *Directory) readDefintion(mf *mibFile, s *Scanner) error {
 			if err != nil {
 				return err
 			}
-			for _, e := range exports {
-				t := e.String()
+			exports.ForEach(func(tok *Token) error {
+				t := tok.String()
 				if t != "," && t != ";" {
-					mf.exports = append(mf.exports, e.String())
+					mf.exports = append(mf.exports, t)
 				}
-			}
+				return nil
+			})
 		default:
-			defintionPosition := tok.source
-			name := tok.String()
-			if !s.Scan() {
-				return position.Errorf("unterminated DEFINITION::=BEGIN")
-			}
-			var newDefintion Definition
-			if s.LookAhead(0).String() == "::=" {
-				reader := &simpleTypeDefintionReader{}
-				newDefintion, err = reader.ReadDefinition(name, d, s)
-				if err != nil {
-					return err
-				}
-				d.definitions[name] = newDefintion
-				mf.definitions[name] = newDefintion
-				continue
-			}
-			defType := s.Pop()
-			if defType.Type() != IDENT {
-				return defType.Errorf("unexpected %q in DEFINITION::=BEGIN", s.LookAhead(0))
-			}
-			defintion, ok := d.definitions[defType.String()]
-			if !ok {
-				return defintionPosition.Errorf("unknown definition type %s", defType.String())
-			}
-			reader, ok := defintion.(TypeDefinition)
-			if !ok {
-				return defintionPosition.Errorf("definition type %s is not a reader", defType.String())
-			}
-			newDefintion, err := reader.Read(name, d, s)
+			name, err := s.PopType(IDENT)
 			if err != nil {
 				return err
 			}
-			d.definitions[name] = newDefintion
-			mf.definitions[name] = newDefintion
+			peek, err := s.LookAhead(0)
+			if err != nil {
+				return err
+			}
+			var reader TypeDefinition
+			var typeName string
+			if peek.IsText("::=") {
+				typeName = ""
+			} else {
+				defType, _ := s.PopType(IDENT)
+				typeName = defType.String()
+			}
+			defintion, ok := d.definitions[typeName]
+			if !ok {
+				return name.Errorf("unknown definition type %s", typeName)
+			}
+			reader, ok = defintion.(TypeDefinition)
+			if !ok {
+				return name.Errorf("definition type %s is not a reader", typeName)
+			}
+			newDefintion, err := reader.Read(name.String(), d, s)
+			if err != nil {
+				return err
+			}
+			d.definitions[name.String()] = newDefintion
+			mf.definitions[name.String()] = newDefintion
 		}
 	}
 }
@@ -187,36 +190,47 @@ func (d *Directory) readImports(s *Scanner) error {
 		return err
 	}
 	for {
-		var dependencies TokenList
-		firsttok := s.Pop()
+		dependencies := &TokenList{
+			Filename: s.Source().Filename,
+		}
+		firsttok, err := s.Pop()
+		if err != nil {
+			return err
+		}
 		if firsttok.String() == ";" {
 			return nil
 		}
-		dependancyPosition := firsttok.source
-		dependencies = append(dependencies, firsttok)
+		dependancyPosition := firsttok.Source()
+		dependencies.AppendTokens(firsttok)
 	innerloop:
 		for {
-			tok := s.Pop()
+			tok, err := s.Pop()
+			if err != nil {
+				return err
+			}
 			switch tok.String() {
 			case "FROM":
-				otherModule, err := s.PopIdent()
+				otherModule, err := s.PopType(IDENT)
 				if err != nil {
 					return err
 				}
-				for _, dep := range dependencies {
-					_, ok := d.definitions[dep.String()]
+				err = dependencies.ForEach(func(dependancy *Token) error {
+					_, ok := d.definitions[dependancy.String()]
 					if !ok {
-						return dependancyPosition.Errorf("needs %q from %q", dep.String(), otherModule.String())
+						return dependancyPosition.Errorf("needs %q from %q", dependancy.String(), otherModule.String())
 					}
+					return nil
+				})
+				if err != nil {
+					return err
 				}
-				dependencies = nil
 				break innerloop
 			case ",":
-				dependancy, err := s.PopIdent()
+				dependancy, err := s.PopType(IDENT)
 				if err != nil {
 					return err
 				}
-				dependencies = append(dependencies, dependancy)
+				dependencies.AppendTokens(dependancy)
 			default:
 				return dependancyPosition.Errorf("unexpected %q in IMPORTS", tok.String())
 			}
