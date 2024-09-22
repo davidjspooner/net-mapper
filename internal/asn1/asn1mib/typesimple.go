@@ -1,6 +1,8 @@
 package asn1mib
 
 import (
+	"context"
+	"slices"
 	"strconv"
 
 	"github.com/davidjspooner/net-mapper/internal/asn1/asn1binary"
@@ -8,6 +10,8 @@ import (
 )
 
 //-----------------------
+
+var simpleTypeNames = []string{"INTEGER", "OCTET STRING", "SEQUENCE", "SEQUENCE OF", "CHOICE", "OBJECT IDENTIFIER", "IA5String"}
 
 type simpleValue struct {
 	source Position
@@ -29,20 +33,40 @@ func (td *simpleTypeDefintion) Source() Position {
 	return td.source
 }
 
-func (u *simpleTypeDefintion) Read(name string, d *Directory, s *Scanner) (Definition, error) {
-	return nil, u.source.WrapError(asn1core.NewUnimplementedError("simple type definition %s", name).MaybeLater())
+func (td *simpleTypeDefintion) ReadOID(ctx context.Context, name string, meta *TokenList, s *Scanner) (Definition, error) {
+	tokens, err := s.PopBlock("{", "}")
+	if err != nil {
+		return nil, err
+	}
+	valuePosition := tokens.Source()
+	if tokens.IsEOF() {
+		return nil, valuePosition.Errorf("empty OID definition")
+	}
+	return &oidDefintion{tokens: *tokens, source: *valuePosition}, nil
+}
+
+func (u *simpleTypeDefintion) Read(ctx context.Context, name string, meta *TokenList, s *Scanner) (Definition, error) {
+	switch u.typeClass {
+	case Object_Identifier:
+		oid, err := u.ReadOID(ctx, name, meta, s)
+		if err != nil {
+			return nil, err
+		}
+		return oid, nil
+	default:
+		reader, err := Lookup[TypeDefinition](ctx, u.typeClass)
+		if err != nil {
+			return nil, u.source.WrapError(err)
+		}
+		return reader.Read(ctx, name, meta, s)
+	}
 }
 
 // -----------------------
 
 var closer = map[string]string{"{": "}", "(": ")", "[": "]"}
 
-func (td *simpleTypeDefintion) Initialize(name string, d *Directory, s *Scanner) error {
-	meta, err := s.PopUntil("::=")
-	if err != nil {
-		return meta.Source().Errorf("unterminated definition %q", name)
-	}
-	_ = meta
+func (td *simpleTypeDefintion) Initialize(ctx context.Context, name string, meta *TokenList, s *Scanner) error {
 	ident, err := s.LookAhead(0)
 	if err != nil {
 		return err
@@ -86,8 +110,7 @@ func (td *simpleTypeDefintion) Initialize(name string, d *Directory, s *Scanner)
 	}
 
 	td.typeClass = ident.String()
-	switch ident.String() {
-	case Octet_String, "INTEGER", "CHOICE", "SEQUENCE", "SEQUENCE OF", "SET", "SET OF":
+	if slices.Contains(simpleTypeNames, td.typeClass) {
 		peek, err := s.LookAhead(0)
 		if err != nil {
 			return err
@@ -102,16 +125,11 @@ func (td *simpleTypeDefintion) Initialize(name string, d *Directory, s *Scanner)
 			td.constraint = *constraint
 		}
 		return nil
-	case Object_Identifier:
-		peek, err := s.LookAhead(0)
-		if err != nil {
-			return err
-		}
-		if peek.Type() == IDENT {
-			return nil
-		}
-		return td.source.WrapError(asn1core.NewUnimplementedError("Object_Identifier type definition").MaybeLater())
-	default:
-		return td.source.WrapError(asn1core.NewUnimplementedError("simple type definition %s", ident.String()).MaybeLater())
 	}
+	def, err := Lookup[TypeDefinition](ctx, ident.String())
+	if err != nil {
+		return ident.WrapError(err)
+	}
+	_ = def
+	return ident.WrapError(asn1core.NewUnimplementedError("simple type definition %s", ident.String()).MaybeLater())
 }

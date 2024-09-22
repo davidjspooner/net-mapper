@@ -49,7 +49,7 @@ func (tl *TokenList) PopBlock(start, end string) (*TokenList, error) {
 		return nil, err
 	}
 	if !head.IsText(start) {
-		return nil, head.Errorf("expected %s", start)
+		return nil, head.Errorf("expected %s but got %s", start, head.String())
 	}
 	level := 0
 

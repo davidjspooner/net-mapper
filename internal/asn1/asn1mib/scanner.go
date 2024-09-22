@@ -369,19 +369,23 @@ func splitEOL(s *Scanner, data []byte, atEOF bool) (advance int, token []byte, e
 	return 1, data[:1], nil
 }
 
-func ExtractString(original string) (string, error) {
+func UnquoteString(t *Token) (string, error) {
+	if t.Type() != STRING {
+		return "", t.Errorf("not a string")
+	}
+	original := t.String()
 	if len(original) < 2 {
-		return "", fmt.Errorf("string too short")
+		return "", t.Errorf("string too short")
 	}
 	if original[0] != original[len(original)-1] {
-		return "", fmt.Errorf("string not terminated")
+		return "", t.Errorf("string not terminated")
 	}
 	output := original[1 : len(original)-1]
 	for i := 0; i < len(output); i++ {
 		switch output[i] {
 		case '\\':
 			if i+1 >= len(output) {
-				return "", fmt.Errorf("invalid escape sequence")
+				return "", t.Errorf("invalid escape sequence")
 			}
 			switch output[i+1] {
 			case 'n':
@@ -397,7 +401,7 @@ func ExtractString(original string) (string, error) {
 			case '"':
 				output = output[:i] + "\"" + output[i+2:]
 			default:
-				return "", fmt.Errorf("invalid escape sequence")
+				return "", t.Errorf("invalid escape sequence")
 			}
 		case '\n', '\r':
 			base := i
@@ -447,7 +451,7 @@ func (s *Scanner) PopBlock(start, end string) (*TokenList, error) {
 		return nil, err
 	}
 	if !head.IsText(start) {
-		return nil, head.Errorf("expected %s", start)
+		return nil, head.Errorf("expected %s but got %s", start, head.String())
 	}
 	for {
 		tok, err := s.Pop()

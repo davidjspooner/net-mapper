@@ -1,11 +1,11 @@
 package asn1mib
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/davidjspooner/net-mapper/internal/asn1/asn1core"
-	"github.com/davidjspooner/net-mapper/internal/asn1/asn1go"
 )
 
 type mibFile struct {
@@ -26,7 +26,10 @@ func NewDirectory() *Directory {
 		definitions: make(map[string]Definition),
 	}
 	d.definitions[""] = &Definer[*simpleTypeDefintion]{}
-	d.definitions["OBJECT IDENTIFIER"] = &oidReader{}
+
+	for _, simpleType := range simpleTypeNames {
+		d.definitions[simpleType] = &simpleTypeDefintion{typeClass: simpleType}
+	}
 	d.definitions["MACRO"] = &Definer[*macroDefintion]{}
 	d.definitions["iso"] = &oidDefintion{
 		oid:    []int{1},
@@ -46,6 +49,15 @@ func (d *Directory) CreateIndex() error {
 
 	todo = append(todo, d.files...)
 
+	ctx := context.Background()
+	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, error) {
+		d, ok := d.definitions[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown definition %s", name)
+		}
+		return d, nil
+	})
+
 	progress := true
 	for progress {
 		failed = nil
@@ -54,7 +66,7 @@ func (d *Directory) CreateIndex() error {
 		}
 		progress = false
 		for _, f := range todo {
-			f.err = d.tryReadMib(f)
+			f.err = d.tryReadMib(ctx, f)
 			if f.err != nil {
 				failed = append(failed, f)
 			} else {
@@ -75,7 +87,7 @@ func (d *Directory) CreateIndex() error {
 	return nil
 }
 
-func (d *Directory) tryReadMib(mf *mibFile) error {
+func (d *Directory) tryReadMib(ctx context.Context, mf *mibFile) error {
 
 	mf.exports = nil
 
@@ -89,7 +101,7 @@ func (d *Directory) tryReadMib(mf *mibFile) error {
 		return err
 	}
 	for !s.IsEOF() {
-		err = d.readDefintion(mf, s)
+		err = d.readDefintion(ctx, mf, s)
 		if err != nil {
 			return err
 		}
@@ -112,7 +124,7 @@ func (d *Directory) tryReadMib(mf *mibFile) error {
 	return s.Err()
 }
 
-func (d *Directory) readDefintion(mf *mibFile, s *Scanner) error {
+func (d *Directory) readDefintion(ctx context.Context, mf *mibFile, s *Scanner) error {
 	ident, err := s.Pop()
 	if err != nil {
 		return err
@@ -137,6 +149,7 @@ func (d *Directory) readDefintion(mf *mibFile, s *Scanner) error {
 				return err
 			}
 		case "EXPORTS":
+			s.Pop()                         //discard EXPORTS;
 			exports, err := s.PopUntil(";") //discard
 			if err != nil {
 				return err
@@ -173,7 +186,11 @@ func (d *Directory) readDefintion(mf *mibFile, s *Scanner) error {
 			if !ok {
 				return name.Errorf("definition type %s is not a reader", typeName)
 			}
-			newDefintion, err := reader.Read(name.String(), d, s)
+			meta, err := s.PopUntil("::=")
+			if err != nil {
+				return err
+			}
+			newDefintion, err := reader.Read(ctx, name.String(), meta, s)
 			if err != nil {
 				return err
 			}
@@ -236,16 +253,4 @@ func (d *Directory) readImports(s *Scanner) error {
 			}
 		}
 	}
-}
-
-func (d *Directory) OIDLookup(s string) (asn1go.OID, error) {
-	definition, ok := d.definitions[s]
-	if !ok {
-		return nil, fmt.Errorf("unknown OID %s", s)
-	}
-	oidDefintion, ok := definition.(OIDValue)
-	if !ok {
-		return nil, fmt.Errorf("definition %s (%T) is not an OID", s, definition)
-	}
-	return oidDefintion.OID(), nil
 }
