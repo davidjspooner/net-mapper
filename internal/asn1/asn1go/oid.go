@@ -81,3 +81,29 @@ func (o *OID) String() string {
 	}
 	return sb.String()
 }
+
+func ParseOID(s string, oidLookupFn func(string) (OID, error)) (OID, error) {
+	parts := strings.Split(s, ".")
+	oid := make(OID, 0, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil, asn1core.NewErrorf("OID element %d of %q is empty", i, s)
+		}
+		if part[0] >= '0' && part[0] <= '9' {
+			n, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, asn1core.NewErrorf("OID element %d of %q is not a number", i, s)
+			}
+			oid = append(oid, n)
+		} else if oidLookupFn != nil {
+			lookup, err := oidLookupFn(part)
+			if err != nil {
+				return nil, err
+			}
+			oid = append(oid, lookup...)
+		} else {
+			return nil, asn1core.NewErrorf("unable to resolve OID element %d of %q", i, s)
+		}
+	}
+	return oid, nil
+}
