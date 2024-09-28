@@ -1,45 +1,26 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/davidjspooner/net-mapper/internal/asn1/asn1core"
-	"github.com/davidjspooner/net-mapper/internal/asn1/asn1mib"
-	"github.com/davidjspooner/net-mapper/internal/snmp"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/snmp"
+	"github.com/davidjspooner/net-mapper/pkg/snmp/mibdb"
 )
 
-func ReadAllMibs(dirname string) error {
+func ReadAllMibs(ctx context.Context, dirname string) error {
 
-	mibDrectory := asn1mib.NewDirectory()
+	mibDB := mibdb.New()
 
-	files, err := os.ReadDir(dirname)
+	err := mibDB.AddDirectory(dirname)
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-		nameL := strings.ToLower(file.Name())
-		if strings.HasSuffix(nameL, ".mib") {
-			err := mibDrectory.AddFile(dirname + file.Name())
-			if err != nil {
-				return err
-			}
-		}
-	}
-	err = mibDrectory.CreateIndex()
-	if err != nil {
-		errors := err.(asn1core.ErrorList)
-		for _, e := range errors {
-			fmt.Printf("Error: %v\n", e)
-		}
-		return err
-	}
-	return nil
+	err = mibDB.CreateIndex(ctx)
+	return err
 }
 
 func DecodeDump(filename string) error {
@@ -104,11 +85,19 @@ func DecodeDump(filename string) error {
 }
 
 func main() {
+	ctx := context.Background()
 
-	err := ReadAllMibs("/mnt/homelab-atom/static/mib/")
+	err := ReadAllMibs(ctx, "/mnt/homelab-atom/static/mib/")
 
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		errors, multiError := err.(asn1core.ErrorList)
+		if multiError {
+			for _, e := range errors {
+				fmt.Printf("Error: %v\n", e)
+			}
+		} else {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 
 	//	for _, vb := range response.VarBinds {
