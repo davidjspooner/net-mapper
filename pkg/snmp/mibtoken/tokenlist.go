@@ -6,11 +6,11 @@ import (
 )
 
 type List struct {
-	Filename string
+	source   Source
 	elements []*Token
 }
 
-var _ Queue = (*List)(nil)
+var _ Reader = (*List)(nil)
 
 func (tl List) String() string {
 	sb := &strings.Builder{}
@@ -37,13 +37,13 @@ func (tl *List) Pop() (*Token, error) {
 
 func (tl *List) LookAhead(n int) (*Token, error) {
 	if n >= len(tl.elements) {
-		return nil, EOFPosition(tl.Filename).WrapError(io.EOF)
+		return nil, EOFPosition(tl.source.Filename).WrapError(io.EOF)
 	}
 	return tl.elements[n], nil
 }
 
-func (tl *List) PopBlock(start, end string) (*List, error) {
-	block := &List{tl.Filename, nil}
+func (tl *List) ReadBlock(start, end string) (*List, error) {
+	block := &List{*tl.Source(), nil}
 	head, err := tl.LookAhead(0)
 	if err != nil {
 		return nil, err
@@ -72,8 +72,8 @@ func (tl *List) PopBlock(start, end string) (*List, error) {
 	}
 }
 
-func (tl *List) PopUntil(end string) (*List, error) {
-	block := &List{tl.Filename, nil}
+func (tl *List) ReadUntil(end string) (*List, error) {
+	block := &List{*tl.Source(), nil}
 	for {
 		t, err := tl.Pop()
 		if err != nil {
@@ -96,7 +96,7 @@ func (tl *List) IsEOF() bool {
 
 func (tl *List) Clone() *List {
 	clone := &List{
-		Filename: tl.Filename,
+		source:   *tl.Source(),
 		elements: make([]*Token, len(tl.elements)),
 	}
 	copy(clone.elements, tl.elements)
@@ -113,7 +113,7 @@ func (tl *List) AppendLists(tokens ...*List) {
 	}
 }
 
-func (tl *List) PopExpected(elems ...string) error {
+func (tl *List) ReadExpected(elems ...string) error {
 	for _, e := range elems {
 		t, err := tl.Pop()
 		if err != nil {
@@ -126,9 +126,9 @@ func (tl *List) PopExpected(elems ...string) error {
 	return nil
 }
 
-func (tl *List) Source() *Position {
+func (tl *List) Source() *Source {
 	if len(tl.elements) == 0 {
-		return EOFPosition(tl.Filename)
+		return EOFPosition(tl.Source().Filename)
 	}
 	return tl.elements[0].Source()
 }
@@ -180,7 +180,7 @@ func (tl *List) Slice(start, end int) (*List, error) {
 		return nil, tl.Source().Errorf("start index %d is greater than end index %d", start, end)
 	}
 	tl2 := List{
-		Filename: tl.Filename,
+		source:   *tl.Source(),
 		elements: make([]*Token, end-start),
 	}
 	copy(tl2.elements, tl.elements[start:end])

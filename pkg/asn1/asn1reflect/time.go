@@ -26,7 +26,7 @@ func (s *timeReflectHandler) PackAsn1(reflectedValue *reflect.Value, params *asn
 	case asn1core.TagDate, asn1core.TagTime:
 		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("structReflectHandler.PackAsn1Time")
 	default:
-		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("unsupported time format %s", format).MaybeLater()
+		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("unsupported time format %s", format).TODO()
 	}
 }
 func (s *timeReflectHandler) UnpackAsn1(reflectedValue *reflect.Value, envelope asn1binary.Envelope, bytes []byte) error {
@@ -48,6 +48,6 @@ func (s *timeReflectHandler) UnpackAsn1(reflectedValue *reflect.Value, envelope 
 	case asn1core.TagDate, asn1core.TagTime:
 		return asn1core.NewUnimplementedError("structReflectHandler.PackAsn1Time")
 	default:
-		return asn1core.NewUnimplementedError("unsupported time format %s", envelope.Tag).MaybeLater()
+		return asn1core.NewUnimplementedError("unsupported time format %s", envelope.Tag).TODO()
 	}
 }

@@ -124,6 +124,7 @@ func (d *Database) readDefintions(ctx context.Context) error {
 				continue
 			}
 			d.modules[module.Name()] = module
+			progress = true
 			exports, err := module.Exports()
 			if err != nil {
 				errList = append(errList, err)
@@ -161,21 +162,21 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 	return nil
 }
 
-//func (d *Database) MustReadBuiltInType(text string) *SimpleType {
-//	mibType := &SimpleType{}
-//	r := strings.NewReader(text)
-//	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
-//
-//	if err != nil {
-//		panic(err)
-//	}
-//	ctx := d.withContext(context.Background())
-//	err = mibType.read(ctx, s)
-//	if err != nil {
-//		panic(err)
-//	}
-//	return mibType
-//}
+func readValue(ctx context.Context, typeName string, s mibtoken.Reader) (Value, error) {
+	valueType, err := Lookup[Type](ctx, typeName)
+	if err != nil {
+		return nil, err
+	}
+	err = valueType.compile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	value, err := valueType.readValue(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
 
 func (d *Database) MustReadBuiltInValue(valueTypeName, text string) Value {
 	r := strings.NewReader(text)
@@ -185,16 +186,7 @@ func (d *Database) MustReadBuiltInValue(valueTypeName, text string) Value {
 		panic(err)
 	}
 	ctx := d.withContext(context.Background())
-
-	valueType, err := Lookup[Type](ctx, valueTypeName)
-	if err != nil {
-		panic(err)
-	}
-	err = valueType.compile(ctx)
-	if err != nil {
-		panic(err)
-	}
-	value, err := valueType.readValue(ctx, s)
+	value, err := readValue(ctx, valueTypeName, s)
 	if err != nil {
 		panic(err)
 	}

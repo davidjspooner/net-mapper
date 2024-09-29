@@ -13,7 +13,7 @@ type anyReflectHandler struct {
 
 func (sfh *anyReflectHandler) PackAsn1(reflectedValue *reflect.Value, params *asn1binary.Parameters) (asn1binary.Envelope, []byte, error) {
 	if reflectedValue.IsNil() {
-		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("packing a NULL value for %s", reflectedValue.Type().String()).MaybeLater()
+		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("packing a NULL value for %s", reflectedValue.Type().String()).TODO()
 	}
 	realValue := reflectedValue.Elem()
 	packer, err := getPackerForReflectedValue(realValue)

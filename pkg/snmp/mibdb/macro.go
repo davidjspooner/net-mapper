@@ -9,15 +9,16 @@ import (
 )
 
 type MacroDefintion struct {
-	source     mibtoken.Position
+	name       string
+	source     mibtoken.Source
 	metaTokens *mibtoken.List
 	fields     map[string]Type
 }
 
-var _ Definition = (*MacroDefintion)(nil)
+var _ Type = (*MacroDefintion)(nil)
 
-func (mibMacro *MacroDefintion) read(ctx context.Context, s mibtoken.Queue) error {
-	block, err := s.PopBlock("BEGIN", "END")
+func (mibMacro *MacroDefintion) readDefinition(ctx context.Context, s mibtoken.Reader) error {
+	block, err := mibtoken.ReadBlock(s, "BEGIN", "END")
 	if err != nil {
 		return err
 	}
@@ -30,18 +31,13 @@ func (mibMacro *MacroDefintion) read(ctx context.Context, s mibtoken.Queue) erro
 		if ttype != mibtoken.IDENT {
 			return token.WrapError(asn1core.NewUnexpectedError("UPPERCASETOKEN", token.String(), "macro element"))
 		}
-		err = block.PopExpected("::=")
+		err = block.ReadExpected("::=")
 		if err != nil {
 			return err
 		}
 		choices := &choiceType{source: *block.Source()}
 		err = choices.readDefinition(ctx, block)
 		fieldName := token.String()
-
-		fmt.Printf("DEBUG   Field: %s\n", fieldName)
-		for _, alt := range choices.alternatives {
-			fmt.Printf("DEBUG      Alternative: %s\n", alt.String())
-		}
 
 		if err != nil {
 			return err
@@ -62,10 +58,37 @@ func (mibMacro *MacroDefintion) read(ctx context.Context, s mibtoken.Queue) erro
 	return nil
 }
 
-func (mibMacro *MacroDefintion) Source() mibtoken.Position {
+func (mibMacro *MacroDefintion) Source() mibtoken.Source {
 	return mibMacro.source
 }
 
 func (mibMacro *MacroDefintion) compile(ctx context.Context) error {
-	return asn1core.NewUnimplementedError("MacroDefintion.Compile").MaybeLater()
+	return nil
+}
+
+func (mibMacro *MacroDefintion) Name() string {
+	return mibMacro.name
+}
+
+func (mibMacro *MacroDefintion) String() string {
+	return mibMacro.Name()
+}
+
+func (mibMacro *MacroDefintion) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
+
+	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, error) {
+		return mibMacro.fields[name], nil
+	})
+
+	typeNotation := mibMacro.fields["TYPE NOTATION"]
+	if typeNotation == nil {
+		return nil, fmt.Errorf("missing TYPE NOTATION in macro %s", mibMacro.Name())
+	}
+
+	value, err := typeNotation.readValue(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+
 }

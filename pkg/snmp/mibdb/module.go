@@ -45,7 +45,7 @@ func (module *Module) Exports() (map[string]Definition, error) {
 	return exports, nil
 }
 
-func (module *Module) read(ctx context.Context, s mibtoken.Queue) error {
+func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 	if module.definitions == nil {
 		module.definitions = make(map[string]Definition)
 	}
@@ -54,7 +54,7 @@ func (module *Module) read(ctx context.Context, s mibtoken.Queue) error {
 	if err != nil {
 		return err
 	}
-	err = s.PopExpected("DEFINITIONS", "::=", "BEGIN")
+	err = mibtoken.ReadExpected(s, "DEFINITIONS", "::=", "BEGIN")
 	if err != nil {
 		return err
 	}
@@ -77,15 +77,15 @@ func (module *Module) read(ctx context.Context, s mibtoken.Queue) error {
 				return err
 			}
 		default:
-			metaTokens, err := s.PopUntil("::=")
+			metaTokens, err := mibtoken.ReadUntil(s, "::=")
 			if err != nil {
 				return err
 			}
 			if metaTokens.Length() > 0 {
 				Type, _ := metaTokens.LookAhead(0)
 				if Type.String() == "MACRO" {
-					mibMacro := &MacroDefintion{metaTokens: metaTokens, source: *name.Source()}
-					err = mibMacro.read(ctx, s)
+					mibMacro := &MacroDefintion{name: name.String(), metaTokens: metaTokens, source: *name.Source()}
+					err = mibMacro.readDefinition(ctx, s)
 					if err != nil {
 						return err
 					}
@@ -130,27 +130,19 @@ func (module *Module) read(ctx context.Context, s mibtoken.Queue) error {
 				continue
 			}
 
-			valueType, err := Lookup[Type](ctx, peekStr)
+			s.Pop() //consume the peek
+			value, err := readValue(ctx, peekStr, s)
 			if err != nil {
 				return name.WrapError(err)
 			}
-			err = valueType.compile(ctx)
-			if err != nil {
-				return err
-			}
-			value, err := valueType.readValue(ctx, s)
-			if err != nil {
-				return err
-			}
-			s.Pop() //consume the peek
 			module.definitions[name.String()] = value
 		}
 	}
 }
 
-func (module *Module) readImports(s mibtoken.Queue) error {
+func (module *Module) readImports(s mibtoken.Reader) error {
 	module.imports = make(map[string]reference)
-	tokens, err := s.PopUntil(";")
+	tokens, err := mibtoken.ReadUntil(s, ";")
 	if err != nil {
 		return err
 	}
@@ -186,8 +178,8 @@ func (module *Module) readImports(s mibtoken.Queue) error {
 	return nil
 }
 
-func (module *Module) readExports(s mibtoken.Queue) error {
-	tokens, err := s.PopUntil(";")
+func (module *Module) readExports(s mibtoken.Reader) error {
+	tokens, err := mibtoken.ReadUntil(s, ";")
 	if err != nil {
 		return err
 	}

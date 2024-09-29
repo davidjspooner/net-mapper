@@ -8,10 +8,10 @@ import (
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
-var builtInPosition = mibtoken.Position{Filename: "<BUILTIN>"}
+var builtInPosition = mibtoken.Source{Filename: "<BUILTIN>"}
 
 type Definition interface {
-	Source() mibtoken.Position
+	Source() mibtoken.Source
 }
 
 type TypeDefinition interface {
@@ -43,7 +43,7 @@ func (mdd *Definer[T]) Read(ctx context.Context, name string, meta *mibtoken.Lis
 	return t, nil
 }
 
-func (mdd *Definer[T]) Source() mibtoken.Position {
+func (mdd *Definer[T]) Source() mibtoken.Source {
 	return builtInPosition
 }
 
@@ -83,5 +83,5 @@ func Lookup[T any](ctx context.Context, name string) (T, error) {
 			l = l.prev
 		}
 	}
-	return null, fmt.Errorf("unknown definition %s", name)
+	return null, fmt.Errorf("unknown definition %q", name)
 }

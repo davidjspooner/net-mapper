@@ -2,8 +2,9 @@ package mibdb
 
 import (
 	"context"
+	"strconv"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
@@ -12,22 +13,25 @@ type Value interface {
 	compile(ctx context.Context) error
 }
 
+// ------------------------------------
+
 type OidValue struct {
 	elements   []string
 	metaTokens *mibtoken.List
-	source     mibtoken.Position
+	source     mibtoken.Source
+	compiled   asn1go.OID
 }
 
 var _ Definition = (*OidValue)(nil)
 
-func (value *OidValue) readOid(_ context.Context, s mibtoken.Queue) error {
+func (value *OidValue) readOid(_ context.Context, s mibtoken.Reader) error {
 	value.source = *s.Source()
 	peek, err := s.LookAhead(0)
 	if err != nil {
 		return err
 	}
 	if peek.String() == "{" {
-		elements, err := s.PopBlock("{", "}")
+		elements, err := mibtoken.ReadBlock(s, "{", "}")
 		if err != nil {
 			return err
 		}
@@ -44,30 +48,60 @@ func (value *OidValue) readOid(_ context.Context, s mibtoken.Queue) error {
 	return nil
 }
 
-func (value *OidValue) Source() mibtoken.Position {
+func (value *OidValue) Source() mibtoken.Source {
 	return value.source
 }
 
 func (value *OidValue) compile(ctx context.Context) error {
-	return asn1core.NewUnimplementedError("OidValue.Compile").MaybeLater()
+	if len(value.compiled) > 0 {
+		return nil
+	}
+	for _, element := range value.elements {
+
+		n, err := strconv.Atoi(element)
+		if err == nil {
+			value.compiled = append(value.compiled, n)
+			continue
+		}
+		other, err := Lookup[Definition](ctx, element)
+		if err != nil {
+			value.compiled = nil
+			return value.source.WrapError(err)
+		}
+		otherOID, ok := other.(*OidValue)
+		if !ok {
+			value.compiled = nil
+			return value.source.Errorf("expected OID but got %T", other)
+		}
+		err = otherOID.compile(ctx)
+		if err != nil {
+			value.compiled = nil
+			return value.source.WrapError(err)
+		}
+		value.compiled = nil
+		value.compiled = append(value.compiled, otherOID.compiled...)
+	}
+	return nil
 }
+
+// ------------------------------------
 
 type ConstantValue struct {
 	elements   []string
 	metaTokens *mibtoken.List
-	source     mibtoken.Position
+	source     mibtoken.Source
 }
 
 var _ Definition = (*ConstantValue)(nil)
 
-func (value *ConstantValue) read(_ context.Context, s mibtoken.Queue) error {
+func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 	value.source = *s.Source()
 	peek, err := s.LookAhead(0)
 	if err != nil {
 		return err
 	}
 	if peek.String() == "{" {
-		elements, err := s.PopBlock("{", "}")
+		elements, err := mibtoken.ReadBlock(s, "{", "}")
 		if err != nil {
 			return err
 		}
@@ -84,30 +118,44 @@ func (value *ConstantValue) read(_ context.Context, s mibtoken.Queue) error {
 	return nil
 }
 
-func (value *ConstantValue) Source() mibtoken.Position {
+func (value *ConstantValue) Source() mibtoken.Source {
 	return value.source
 }
 
 func (value *ConstantValue) compile(_ context.Context) error {
-	return asn1core.NewUnimplementedError("ConstantValue.Compile").MaybeLater()
+	return nil
 }
 
+// ------------------------------------
+
 type structureValue struct {
-	source     mibtoken.Position
+	source     mibtoken.Source
 	vType      Type
 	metaTokens *mibtoken.List
 	fields     map[string]Value
 }
 
-func (value *structureValue) Source() mibtoken.Position {
+func (value *structureValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *structureValue) read(_ context.Context, s mibtoken.Queue) error {
-	//TODO use the macro definition to parse the invocation
-	return value.source.WrapError(asn1core.NewUnimplementedError("structureValue.read").MaybeLater())
+func (value *structureValue) compile(ctx context.Context) error {
+	return nil
 }
 
-func (value *structureValue) compile(ctx context.Context) error {
-	return asn1core.NewUnimplementedError("structureValue.Compile").MaybeLater()
+// ------------------------------------
+
+type goValue[T any] struct {
+	value  T
+	source mibtoken.Source
+}
+
+var _ Value = (*goValue[string])(nil)
+
+func (value *goValue[T]) Source() mibtoken.Source {
+	return value.source
+}
+
+func (value *goValue[T]) compile(ctx context.Context) error {
+	return nil
 }

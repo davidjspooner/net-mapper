@@ -5,13 +5,13 @@ import (
 	"strings"
 )
 
-type Position struct {
+type Source struct {
 	Filename string
 	Line     int
 	Column   int
 }
 
-func (p *Position) String() string {
+func (p *Source) String() string {
 	sb := strings.Builder{}
 	if p.Filename != "" {
 		sb.WriteString(p.Filename)
@@ -29,10 +29,10 @@ func (p *Position) String() string {
 	return sb.String()
 }
 
-func (p *Position) IsEOF() bool {
+func (p *Source) IsEOF() bool {
 	return p.Line <= 0 && p.Column <= 0
 }
 
-func EOFPosition(filename string) *Position {
-	return &Position{Filename: filename}
+func EOFPosition(filename string) *Source {
+	return &Source{Filename: filename}
 }

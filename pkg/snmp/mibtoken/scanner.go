@@ -42,7 +42,7 @@ func init() {
 }
 
 type ScannerError struct {
-	Position Position
+	Position Source
 	Err      error
 }
 
@@ -54,11 +54,15 @@ func (se *ScannerError) Unwrap() error {
 	return se.Err
 }
 
-func (p *Position) Errorf(format string, args ...interface{}) error {
+func (p *Source) Errorf(format string, args ...interface{}) error {
 	return p.WrapError(fmt.Errorf(format, args...))
 }
 
-func (p *Position) WrapError(err error) error {
+func (p *Source) WrapError(err error) error {
+	_, isWrapped := err.(*ScannerError)
+	if isWrapped {
+		return err
+	}
 	return &ScannerError{
 		Position: *p,
 		Err:      err,
@@ -68,12 +72,12 @@ func (p *Position) WrapError(err error) error {
 type Scanner struct {
 	inner        *bufio.Scanner
 	queue        List
-	nextPosition Position
+	nextPosition Source
 	skip         map[TokenType]bool
 	ctx          context.Context
 }
 
-var _ Queue = &Scanner{}
+var _ Reader = &Scanner{}
 
 type ScannerOption func(scanner *Scanner) error
 
@@ -91,7 +95,7 @@ func WithSkip(tokenTypes ...TokenType) ScannerOption {
 func WithSource(filename string) ScannerOption {
 	return func(s *Scanner) error {
 		s.nextPosition.Filename = filename
-		s.queue.Filename = filename
+		s.queue.source.Filename = filename
 		return nil
 	}
 }
@@ -106,7 +110,7 @@ func WithContext(ctx context.Context) ScannerOption {
 func NewScanner(r io.Reader, options ...ScannerOption) (*Scanner, error) {
 	s := &Scanner{
 		inner: bufio.NewScanner(r),
-		nextPosition: Position{
+		nextPosition: Source{
 			Line:   1,
 			Column: 1,
 		},
@@ -223,20 +227,6 @@ func (s *Scanner) PopType(tType TokenType) (*Token, error) {
 		}
 	}
 	return actual, err
-}
-
-func (s *Scanner) PopExpected(expectedTexts ...string) error {
-	for n, expectedText := range expectedTexts {
-		s.refillQueue(len(expectedTexts) - n)
-		actual, err := s.Pop()
-		if err != nil {
-			return err
-		}
-		if actual.String() != expectedText {
-			return asn1core.NewUnexpectedError(expectedText, actual.String(), "token")
-		}
-	}
-	return nil
 }
 
 func splitSpace(s *Scanner, data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -360,7 +350,7 @@ func splitEOL(s *Scanner, data []byte, atEOF bool) (advance int, token []byte, e
 	return 1, data[:1], nil
 }
 
-func UnquoteString(t *Token) (string, error) {
+func Unquote(t *Token) (string, error) {
 	if t.Type() != STRING {
 		return "", t.Errorf("not a string")
 	}
@@ -411,58 +401,7 @@ func UnquoteString(t *Token) (string, error) {
 	return output, nil
 }
 
-func (s *Scanner) PopUntil(text string) (*List, error) {
-	tokens := &List{
-		Filename: s.nextPosition.Filename,
-	}
-	for {
-		tok, err := s.Pop()
-		if err != nil {
-			return nil, err
-		}
-		if tok.IsText(text) {
-			return tokens, nil
-		}
-		tokens.AppendTokens(tok)
-	}
-}
-
-func (s *Scanner) Errorf(format string, args ...interface{}) error {
-	return s.Source().Errorf(format, args...)
-}
-func (s *Scanner) WrapError(err error) error {
-	return s.Source().WrapError(err)
-}
-
-func (s *Scanner) PopBlock(start, end string) (*List, error) {
-	level := 0
-	block := &List{Filename: s.nextPosition.Filename}
-	head, err := s.LookAhead(0)
-	if err != nil {
-		return nil, err
-	}
-	if !head.IsText(start) {
-		return nil, head.Errorf("expected %s but got %s", start, head.String())
-	}
-	for {
-		tok, err := s.Pop()
-		if err != nil {
-			return nil, err
-		}
-		block.AppendTokens(tok)
-		if tok.IsText(start) {
-			level++
-		} else if tok.String() == end {
-			level--
-			if level == 0 {
-				block.elements = block.elements[1 : len(block.elements)-1]
-				return block, nil
-			}
-		}
-	}
-}
-
-func (s *Scanner) Source() *Position {
+func (s *Scanner) Source() *Source {
 	s.refillQueue(1)
 	return s.queue.Source()
 }

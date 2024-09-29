@@ -81,7 +81,7 @@ func getPackerForReflectedValue(reflectedValue reflect.Value) (asn1binary.Packer
 	}
 	for reflectedValue.Kind() == reflect.Ptr {
 		if reflectedValue.IsNil() {
-			return nil, asn1core.NewUnimplementedError("cannot pack a NULL value for %s", reflectedValue.Type().String()).MaybeLater()
+			return nil, asn1core.NewUnimplementedError("cannot pack a NULL value for %s", reflectedValue.Type().String()).TODO()
 		}
 		reflectedValue = reflectedValue.Elem()
 	}

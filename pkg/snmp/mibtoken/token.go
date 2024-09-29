@@ -35,26 +35,15 @@ func (t TokenType) String() string {
 
 type Token struct {
 	value    string
-	position Position
+	position Source
 }
 
-func New(value string, position Position) *Token {
+func New(value string, position Source) *Token {
 	return &Token{value: value, position: position}
 }
 
 func EOFToken(filename string) *Token {
 	return &Token{position: *EOFPosition(filename)}
-}
-
-type Queue interface {
-	Pop() (*Token, error)
-	LookAhead(n int) (*Token, error)
-	PopBlock(start, end string) (*List, error) //dont include start and end in list
-	PopUntil(end string) (*List, error)        //dont include end in list
-	PopExpected(elems ...string) error
-	IsEOF() bool
-	Source() *Position
-	WrapError(err error) error
 }
 
 func (t *Token) String() string {
@@ -65,7 +54,7 @@ func (t *Token) IsText(s string) bool {
 	return t.value == s
 }
 
-func (t Token) Source() *Position {
+func (t Token) Source() *Source {
 	return &t.position
 }
 

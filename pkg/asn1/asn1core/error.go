@@ -119,7 +119,7 @@ func (e *GeneralError) WithStack() *GeneralError {
 	return e
 }
 
-func (e *GeneralError) MaybeLater() *GeneralError {
+func (e *GeneralError) TODO() *GeneralError {
 	return e.WithType(FutureImplementationError).WithStack()
 }
 
