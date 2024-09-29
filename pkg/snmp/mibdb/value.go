@@ -3,18 +3,24 @@ package mibdb
 import (
 	"context"
 
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
-type Oid struct {
+type Value interface {
+	Definition
+	compile(ctx context.Context) error
+}
+
+type OidValue struct {
 	elements   []string
 	metaTokens *mibtoken.List
 	source     mibtoken.Position
 }
 
-var _ Definition = (*Oid)(nil)
+var _ Definition = (*OidValue)(nil)
 
-func (value *Oid) read(ctx context.Context, s mibtoken.Queue) error {
+func (value *OidValue) readOid(_ context.Context, s mibtoken.Queue) error {
 	value.source = *s.Source()
 	peek, err := s.LookAhead(0)
 	if err != nil {
@@ -38,19 +44,23 @@ func (value *Oid) read(ctx context.Context, s mibtoken.Queue) error {
 	return nil
 }
 
-func (value *Oid) Source() mibtoken.Position {
+func (value *OidValue) Source() mibtoken.Position {
 	return value.source
 }
 
-type Value struct {
+func (value *OidValue) compile(ctx context.Context) error {
+	return asn1core.NewUnimplementedError("OidValue.Compile").MaybeLater()
+}
+
+type ConstantValue struct {
 	elements   []string
 	metaTokens *mibtoken.List
 	source     mibtoken.Position
 }
 
-var _ Definition = (*Value)(nil)
+var _ Definition = (*ConstantValue)(nil)
 
-func (value *Value) read(ctx context.Context, s mibtoken.Queue) error {
+func (value *ConstantValue) read(_ context.Context, s mibtoken.Queue) error {
 	value.source = *s.Source()
 	peek, err := s.LookAhead(0)
 	if err != nil {
@@ -74,6 +84,30 @@ func (value *Value) read(ctx context.Context, s mibtoken.Queue) error {
 	return nil
 }
 
-func (value *Value) Source() mibtoken.Position {
+func (value *ConstantValue) Source() mibtoken.Position {
 	return value.source
+}
+
+func (value *ConstantValue) compile(_ context.Context) error {
+	return asn1core.NewUnimplementedError("ConstantValue.Compile").MaybeLater()
+}
+
+type structureValue struct {
+	source     mibtoken.Position
+	vType      Type
+	metaTokens *mibtoken.List
+	fields     map[string]Value
+}
+
+func (value *structureValue) Source() mibtoken.Position {
+	return value.source
+}
+
+func (value *structureValue) read(_ context.Context, s mibtoken.Queue) error {
+	//TODO use the macro definition to parse the invocation
+	return value.source.WrapError(asn1core.NewUnimplementedError("structureValue.read").MaybeLater())
+}
+
+func (value *structureValue) compile(ctx context.Context) error {
+	return asn1core.NewUnimplementedError("structureValue.Compile").MaybeLater()
 }

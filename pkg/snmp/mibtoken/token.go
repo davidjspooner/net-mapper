@@ -7,10 +7,9 @@ const (
 	WHITESPACE
 	COMMENT
 	IDENT
-	KEYWORD //entirely uppercase ( included macros )
 	NUMBER
 	STRING
-	PUNCT
+	SYMBOL
 	EOF
 )
 
@@ -22,13 +21,11 @@ func (t TokenType) String() string {
 		return "COMMENT"
 	case IDENT:
 		return "IDENT"
-	case KEYWORD:
-		return "KEYWORD"
 	case NUMBER:
 		return "NUMBER"
 	case STRING:
 		return "STRING"
-	case PUNCT:
+	case SYMBOL:
 		return "PUNCT"
 	case EOF:
 		return "EOF"
@@ -39,6 +36,10 @@ func (t TokenType) String() string {
 type Token struct {
 	value    string
 	position Position
+}
+
+func New(value string, position Position) *Token {
+	return &Token{value: value, position: position}
 }
 
 func EOFToken(filename string) *Token {
@@ -86,7 +87,7 @@ func (t Token) Type() TokenType {
 			}
 			return NUMBER
 		}
-		return PUNCT
+		return SYMBOL
 	case '"', '\'':
 		return STRING
 	case '_':
@@ -95,28 +96,19 @@ func (t Token) Type() TokenType {
 		if c >= '0' && c <= '9' {
 			return NUMBER
 		}
-		upperCount := 0
-		lowerCount := 0
-		for _, c := range t.value {
-			if c >= 'A' && c <= 'Z' {
-				upperCount++
-			} else if c >= 'a' && c <= 'z' {
-				lowerCount++
-			}
-		}
-		if lowerCount == 0 && upperCount > 0 {
-			return KEYWORD
-		}
-		if lowerCount > 0 {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
 			return IDENT
 		}
-
-		return PUNCT
+		return SYMBOL
 	}
 }
 
 func (t *Token) WrapError(err error) error {
-	return t.position.WrapError(err)
+	err = t.position.WrapError(err)
+	// if t.value == "" {
+	// 	print("Token value is empty in mibtoken.Token.WrapError")
+	// }
+	return err
 }
 
 func (t *Token) Errorf(format string, args ...interface{}) error {

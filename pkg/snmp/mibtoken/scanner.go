@@ -189,28 +189,6 @@ func (s *Scanner) refillQueue(desired int) int {
 	return len(s.queue.elements)
 }
 
-/*
-	func (s *Scanner) Scan() bool {
-		if len(s.queue) > 0 {
-			//pop the first token off the queue
-			s.queue.Pop()
-		}
-		s.refillQueue(16)
-		for len(s.queue) > 0 {
-			tType := s.queue[0].Type()
-			if !s.skip[tType] {
-				break
-			}
-			//pop the first token off the queue
-			s.queue.Pop()
-			s.refillQueue(16)
-		}
-		if len(s.queue) != 0 {
-			return true
-		}
-		return false
-	}
-*/
 func (s *Scanner) Pop() (*Token, error) {
 	tok, err := s.LookAhead(0)
 	if err == nil {

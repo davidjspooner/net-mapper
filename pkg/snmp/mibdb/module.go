@@ -24,10 +24,6 @@ func (module *Module) Name() string {
 	return module.name
 }
 
-func (module *Module) Compile(ctx context.Context) error {
-	return asn1core.NewUnimplementedError("mib.Compile").MaybeLater()
-}
-
 func (module *Module) Exports() (map[string]Definition, error) {
 	exports := make(map[string]Definition)
 	if module.exports == nil {
@@ -49,7 +45,7 @@ func (module *Module) Exports() (map[string]Definition, error) {
 	return exports, nil
 }
 
-func (module *Module) readOuter(ctx context.Context, s mibtoken.Queue) error {
+func (module *Module) read(ctx context.Context, s mibtoken.Queue) error {
 	if module.definitions == nil {
 		module.definitions = make(map[string]Definition)
 	}
@@ -62,15 +58,6 @@ func (module *Module) readOuter(ctx context.Context, s mibtoken.Queue) error {
 	if err != nil {
 		return err
 	}
-
-	err = module.readInner(ctx, s)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (module *Module) readInner(ctx context.Context, s mibtoken.Queue) error {
 	for {
 		name, err := s.Pop()
 		if err != nil {
@@ -113,8 +100,8 @@ func (module *Module) readInner(ctx context.Context, s mibtoken.Queue) error {
 			peekStr := peek.String()
 
 			if peekStr == "{" {
-				oid := &Oid{metaTokens: metaTokens, source: *name.Source()}
-				err = oid.read(ctx, s)
+				oid := &OidValue{metaTokens: metaTokens, source: *name.Source()}
+				err = oid.readOid(ctx, s)
 				if err != nil {
 					return err
 				}
@@ -124,7 +111,7 @@ func (module *Module) readInner(ctx context.Context, s mibtoken.Queue) error {
 
 			ttype := peek.Type()
 			if ttype == mibtoken.STRING || ttype == mibtoken.NUMBER {
-				mibType := &Value{metaTokens: metaTokens, source: *name.Source()}
+				mibType := &ConstantValue{metaTokens: metaTokens, source: *name.Source()}
 				err = mibType.read(ctx, s)
 				if err != nil {
 					return err
@@ -135,7 +122,7 @@ func (module *Module) readInner(ctx context.Context, s mibtoken.Queue) error {
 
 			if peekStr == "[" || slices.Contains(simpleTypeNames, peekStr) {
 				mibType := &SimpleType{metaTokens: metaTokens, source: *name.Source()}
-				err = mibType.read(ctx, s)
+				err = mibType.readDefinition(ctx, s)
 				if err != nil {
 					return err
 				}
@@ -143,18 +130,20 @@ func (module *Module) readInner(ctx context.Context, s mibtoken.Queue) error {
 				continue
 			}
 
-			mibMacroInvocation := &MacroInvocation{metaTokens: metaTokens, source: *name.Source()}
-			mibMacroInvocation.use, err = Lookup[*MacroDefintion](ctx, peekStr)
+			valueType, err := Lookup[Type](ctx, peekStr)
 			if err != nil {
 				return name.WrapError(err)
 			}
-
-			s.Pop()
-			err = mibMacroInvocation.read(ctx, s)
+			err = valueType.compile(ctx)
 			if err != nil {
 				return err
 			}
-			module.definitions[name.String()] = mibMacroInvocation
+			value, err := valueType.readValue(ctx, s)
+			if err != nil {
+				return err
+			}
+			s.Pop() //consume the peek
+			module.definitions[name.String()] = value
 		}
 	}
 }
@@ -209,7 +198,7 @@ func (module *Module) readExports(s mibtoken.Queue) error {
 		}
 		if token.String() != "," {
 			switch token.Type() {
-			case mibtoken.IDENT, mibtoken.KEYWORD:
+			case mibtoken.IDENT:
 				//pass
 			default:
 				return token.Errorf("unexpected token %s", token.String())
@@ -246,11 +235,17 @@ func ReadModuleFromFile(ctx context.Context, filename string) (*Module, error) {
 		}
 		return def, nil
 	})
-	for !s.IsEOF() && ctx.Err() == nil {
-		err := module.readOuter(ctx, s)
+	if s.IsEOF() {
+		return nil, s.Err()
+	}
+	for ctx.Err() == nil {
+		err := module.read(ctx, s)
 		if err != nil {
 			return nil, err
 		}
+		if s.IsEOF() {
+			return module, nil
+		}
 	}
-	return module, s.Err()
+	return nil, ctx.Err()
 }

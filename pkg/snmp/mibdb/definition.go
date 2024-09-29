@@ -78,7 +78,7 @@ func Lookup[T any](ctx context.Context, name string) (T, error) {
 				if ok {
 					return t, nil
 				}
-				return null, fmt.Errorf("definition %T does not implment %T", d, null)
+				return null, fmt.Errorf("definition %T does not implment %s", d, reflect.TypeFor[T]().String())
 			}
 			l = l.prev
 		}

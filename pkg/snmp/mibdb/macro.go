@@ -2,32 +2,16 @@ package mibdb
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
-type fieldDefintion struct {
-	fieldName *mibtoken.Token
-	tokens    mibtoken.List
-}
-
-func (fieldDef *fieldDefintion) read(ctx context.Context, s mibtoken.Queue) error {
-	for !s.IsEOF() {
-		peek1, err := s.LookAhead(1)
-		if err == nil && peek1.String() == "::=" {
-			return nil
-		}
-		tok, _ := s.Pop()
-		fieldDef.tokens.AppendTokens(tok)
-	}
-	return nil
-}
-
 type MacroDefintion struct {
 	source     mibtoken.Position
 	metaTokens *mibtoken.List
-	fields     map[string]*fieldDefintion
+	fields     map[string]Type
 }
 
 var _ Definition = (*MacroDefintion)(nil)
@@ -43,22 +27,36 @@ func (mibMacro *MacroDefintion) read(ctx context.Context, s mibtoken.Queue) erro
 			return err
 		}
 		ttype := token.Type()
-		if ttype != mibtoken.KEYWORD && ttype != mibtoken.IDENT {
+		if ttype != mibtoken.IDENT {
 			return token.WrapError(asn1core.NewUnexpectedError("UPPERCASETOKEN", token.String(), "macro element"))
 		}
 		err = block.PopExpected("::=")
 		if err != nil {
 			return err
 		}
-		elementDef := &fieldDefintion{fieldName: token}
-		err = elementDef.read(ctx, block)
+		choices := &choiceType{source: *block.Source()}
+		err = choices.readDefinition(ctx, block)
+		fieldName := token.String()
+
+		fmt.Printf("DEBUG   Field: %s\n", fieldName)
+		for _, alt := range choices.alternatives {
+			fmt.Printf("DEBUG      Alternative: %s\n", alt.String())
+		}
+
 		if err != nil {
 			return err
 		}
 		if mibMacro.fields == nil {
-			mibMacro.fields = make(map[string]*fieldDefintion)
+			mibMacro.fields = make(map[string]Type)
 		}
-		mibMacro.fields[elementDef.fieldName.String()] = elementDef
+		if _, ok := mibMacro.fields[fieldName]; ok {
+			return token.WrapError(asn1core.NewUnexpectedError("DUPLICATE", fieldName, "macro field"))
+		}
+		if len(choices.alternatives) == 1 {
+			mibMacro.fields[fieldName] = choices.alternatives[0]
+		} else {
+			mibMacro.fields[fieldName] = choices
+		}
 	}
 
 	return nil
@@ -68,22 +66,6 @@ func (mibMacro *MacroDefintion) Source() mibtoken.Position {
 	return mibMacro.source
 }
 
-type FieldValue struct {
-	fieldName *mibtoken.Token
-	mibValue  *Oid
-}
-
-type MacroInvocation struct {
-	source     mibtoken.Position
-	use        *MacroDefintion
-	metaTokens *mibtoken.List
-	fields     []FieldValue
-}
-
-func (mibMacroInvocation *MacroInvocation) read(ctx context.Context, s mibtoken.Queue) error {
-	return mibMacroInvocation.source.WrapError(asn1core.NewUnimplementedError("MacroInvocation.read").MaybeLater())
-}
-
-func (mibMacroInvocation *MacroInvocation) Source() mibtoken.Position {
-	return mibMacroInvocation.source
+func (mibMacro *MacroDefintion) compile(ctx context.Context) error {
+	return asn1core.NewUnimplementedError("MacroDefintion.Compile").MaybeLater()
 }

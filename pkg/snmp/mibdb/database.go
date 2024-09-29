@@ -23,7 +23,10 @@ func New() *Database {
 		definitions: make(map[string]Definition),
 		modules:     make(map[string]*Module),
 	}
-	d.definitions["iso"] = d.MustReadBuiltInValue("{ 1 }")
+	for _, simpleType := range simpleTypeNames {
+		d.definitions[simpleType] = &SimpleType{ident: mibtoken.New(simpleType, builtInPosition)}
+	}
+	d.definitions["iso"] = d.MustReadBuiltInValue(mibtoken.Object_Identifier, "{ 1 }")
 	return d
 }
 
@@ -66,18 +69,49 @@ func (d *Database) withContext(ctx context.Context) context.Context {
 	})
 }
 
-func (d *Database) CreateIndex(ctx context.Context) error {
+func (d *Database) compileValues(ctx context.Context) error {
+	//compile all the values now that we have read them all
+	var errList asn1core.ErrorList
 
-	var compile, failed, succeded []*Module
+	var compile []Value
+	var failedCompile []Value
 
-	ctx = d.withContext(ctx)
+	for _, def := range d.definitions {
+		value, ok := def.(Value)
+		if ok {
+			compile = append(compile, value)
+		}
+	}
 
-	//read all the mibs ( but dont try and compile them yet)
-	d.modules = make(map[string]*Module)
+	progress := true
+	for progress {
+		failedCompile = nil
+		errList = nil
+		if len(compile) == 0 {
+			break
+		}
+		progress = false
+		for _, value := range compile {
+			err := value.compile(ctx)
+			if err != nil {
+				failedCompile = append(failedCompile, value)
+				errList = append(errList, err)
+			} else {
+				progress = true
+			}
+		}
+		compile = failedCompile
+	}
+	if len(errList) > 0 {
+		return errList
+	}
+	return nil
+}
+
+func (d *Database) readDefintions(ctx context.Context) error {
 	var errList asn1core.ErrorList
 	progress := true
 	for progress {
-		failed = nil
 		errList = nil
 		progress = false
 		for _, f := range d.filenames {
@@ -106,36 +140,23 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 	if len(errList) > 0 {
 		return errList
 	}
+	return nil
+}
 
-	//compile all the mibs now that we have read them all
+func (d *Database) CreateIndex(ctx context.Context) error {
 
-	for _, module := range d.modules {
-		compile = append(compile, module)
+	ctx = d.withContext(ctx)
+
+	//read all the mibs ( but dont try and compile them yet)
+	d.modules = make(map[string]*Module)
+
+	err := d.readDefintions(ctx)
+	if err != nil {
+		return err
 	}
-
-	progress = true
-	for progress {
-		failed = nil
-		errList = nil
-		if len(compile) == 0 {
-			break
-		}
-		progress = false
-		for _, module := range compile {
-			err := module.Compile(ctx)
-			if err != nil {
-				failed = append(failed, module)
-				errList = append(errList, err)
-			} else {
-				succeded = append(succeded, module)
-				progress = true
-			}
-		}
-		compile = failed
-	}
-	_ = succeded //for debugging
-	if len(errList) > 0 {
-		return errList
+	err = d.compileValues(ctx)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -156,8 +177,7 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 //	return mibType
 //}
 
-func (d *Database) MustReadBuiltInValue(text string) *Oid {
-	value := &Oid{}
+func (d *Database) MustReadBuiltInValue(valueTypeName, text string) Value {
 	r := strings.NewReader(text)
 	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
 
@@ -165,7 +185,16 @@ func (d *Database) MustReadBuiltInValue(text string) *Oid {
 		panic(err)
 	}
 	ctx := d.withContext(context.Background())
-	err = value.read(ctx, s)
+
+	valueType, err := Lookup[Type](ctx, valueTypeName)
+	if err != nil {
+		panic(err)
+	}
+	err = valueType.compile(ctx)
+	if err != nil {
+		panic(err)
+	}
+	value, err := valueType.readValue(ctx, s)
 	if err != nil {
 		panic(err)
 	}
