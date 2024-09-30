@@ -10,7 +10,7 @@ import (
 
 type Value interface {
 	Definition
-	compile(ctx context.Context) error
+	compileValue(ctx context.Context, module *Module) error
 }
 
 // ------------------------------------
@@ -40,6 +40,18 @@ func (value *OidValue) readOid(_ context.Context, s mibtoken.Reader) error {
 			if err != nil {
 				return err
 			}
+			peek, err := elements.LookAhead(0)
+			if err == nil && peek.String() == "(" {
+				block, err := mibtoken.ReadBlock(elements, "(", ")")
+				if err != nil {
+					return err
+				}
+				element, err = block.Pop()
+				if err != nil {
+					return err
+				}
+
+			}
 			value.elements = append(value.elements, element.String())
 		}
 		return nil
@@ -52,7 +64,7 @@ func (value *OidValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *OidValue) compile(ctx context.Context) error {
+func (value *OidValue) compileValue(ctx context.Context, module *Module) error {
 	if len(value.compiled) > 0 {
 		return nil
 	}
@@ -63,25 +75,34 @@ func (value *OidValue) compile(ctx context.Context) error {
 			value.compiled = append(value.compiled, n)
 			continue
 		}
-		other, err := Lookup[Definition](ctx, element)
-		if err != nil {
-			value.compiled = nil
-			return value.source.WrapError(err)
-		}
-		otherOID, ok := other.(*OidValue)
-		if !ok {
-			value.compiled = nil
-			return value.source.Errorf("expected OID but got %T", other)
-		}
-		err = otherOID.compile(ctx)
-		if err != nil {
-			value.compiled = nil
-			return value.source.WrapError(err)
-		}
 		value.compiled = nil
-		value.compiled = append(value.compiled, otherOID.compiled...)
+		switch element {
+		case "iso":
+			value.compiled = append(value.compiled, 1)
+		default:
+			otherDefintion, otherModule, err := LookupInModule[Definition](ctx, module, element)
+			if err != nil {
+				return value.source.WrapError(err)
+			}
+			otherOID, ok := otherDefintion.(*OidValue)
+			if !ok {
+				return value.source.Errorf("expected OID but got %T", otherDefintion)
+			}
+			err = otherOID.compileValue(ctx, otherModule)
+			if err != nil {
+				return value.source.WrapError(err)
+			}
+			value.compiled = append(value.compiled, otherOID.compiled...)
+		}
 	}
 	return nil
+}
+
+func (value *OidValue) String() string {
+	if len(value.compiled) == 0 {
+		return "<uncompiled>"
+	}
+	return value.compiled.String()
 }
 
 // ------------------------------------
@@ -114,6 +135,7 @@ func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 		}
 		return nil
 	}
+	s.Pop()
 	value.elements = append(value.elements, peek.String())
 	return nil
 }
@@ -139,7 +161,7 @@ func (value *structureValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *structureValue) compile(ctx context.Context) error {
+func (value *structureValue) compileValue(ctx context.Context, module *Module) error {
 	return nil
 }
 
@@ -156,6 +178,6 @@ func (value *goValue[T]) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *goValue[T]) compile(ctx context.Context) error {
+func (value *goValue[T]) compileValue(ctx context.Context, module *Module) error {
 	return nil
 }

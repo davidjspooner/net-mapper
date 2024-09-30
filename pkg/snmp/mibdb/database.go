@@ -73,14 +73,11 @@ func (d *Database) compileValues(ctx context.Context) error {
 	//compile all the values now that we have read them all
 	var errList asn1core.ErrorList
 
-	var compile []Value
-	var failedCompile []Value
+	var compile []*Module
+	var failedCompile []*Module
 
-	for _, def := range d.definitions {
-		value, ok := def.(Value)
-		if ok {
-			compile = append(compile, value)
-		}
+	for _, module := range d.modules {
+		compile = append(compile, module)
 	}
 
 	progress := true
@@ -91,10 +88,10 @@ func (d *Database) compileValues(ctx context.Context) error {
 			break
 		}
 		progress = false
-		for _, value := range compile {
-			err := value.compile(ctx)
+		for _, module := range compile {
+			err := module.compile(ctx)
 			if err != nil {
-				failedCompile = append(failedCompile, value)
+				failedCompile = append(failedCompile, module)
 				errList = append(errList, err)
 			} else {
 				progress = true
@@ -118,7 +115,7 @@ func (d *Database) readDefintions(ctx context.Context) error {
 			if _, ok := d.modules[f]; ok {
 				continue
 			}
-			module, err := ReadModuleFromFile(ctx, f)
+			module, err := readModuleFromFile(ctx, d, f)
 			if err != nil {
 				errList = append(errList, err)
 				continue
@@ -159,15 +156,25 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	for name, def := range d.definitions {
+		oid, ok := def.(*OidValue)
+		if !ok {
+			continue
+		}
+		d.addOidToIndex(ctx, name, oid)
+	}
+
 	return nil
+}
+
+func (d *Database) addOidToIndex(ctx context.Context, name string, oid *OidValue) {
+	fmt.Println(name, oid)
+	//TODO
 }
 
 func readValue(ctx context.Context, typeName string, s mibtoken.Reader) (Value, error) {
 	valueType, err := Lookup[Type](ctx, typeName)
-	if err != nil {
-		return nil, err
-	}
-	err = valueType.compile(ctx)
 	if err != nil {
 		return nil, err
 	}

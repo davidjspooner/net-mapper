@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"reflect"
 	"slices"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
@@ -11,9 +12,11 @@ import (
 )
 
 type reference struct {
-	item, module string
+	item, moduleName string
+	module           *Module
 }
 type Module struct {
+	database    *Database
 	name        string
 	imports     map[string]reference
 	exports     []mibtoken.Token
@@ -43,6 +46,20 @@ func (module *Module) Exports() (map[string]Definition, error) {
 		}
 	}
 	return exports, nil
+}
+
+func (module *Module) compile(ctx context.Context) error {
+	for _, def := range module.definitions {
+		value, ok := def.(Value)
+		if !ok {
+			continue
+		}
+		err := value.compileValue(ctx, module)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
@@ -165,8 +182,8 @@ func (module *Module) readImports(s mibtoken.Reader) error {
 				}
 				from := token.String()
 				for _, item := range items {
-					module.imports[item] = reference{item: item, module: from}
-					module.imports[from+"."+item] = reference{item: item, module: from}
+					module.imports[item] = reference{item: item, moduleName: from}
+					module.imports[from+"."+item] = reference{item: item, moduleName: from}
 				}
 				break innerLoop
 			} else {
@@ -209,7 +226,7 @@ func newScanner(r io.Reader, sourceName string) (*mibtoken.Scanner, error) {
 	return s, nil
 }
 
-func ReadModuleFromFile(ctx context.Context, filename string) (*Module, error) {
+func readModuleFromFile(ctx context.Context, database *Database, filename string) (*Module, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -219,7 +236,7 @@ func ReadModuleFromFile(ctx context.Context, filename string) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	module := &Module{}
+	module := &Module{database: database}
 	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, error) {
 		def, ok := module.definitions[name]
 		if !ok {
@@ -240,4 +257,27 @@ func ReadModuleFromFile(ctx context.Context, filename string) (*Module, error) {
 		}
 	}
 	return nil, ctx.Err()
+}
+
+func LookupInModule[T any](ctx context.Context, module *Module, name string) (T, *Module, error) {
+	def, ok := module.definitions[name]
+	var null T
+	otherModule := module
+	if !ok {
+		var err error
+		importFrom := module.imports[name]
+		if importFrom.moduleName == "" {
+			return null, nil, asn1core.NewUnimplementedError("definition %s not found", name)
+		}
+		def, err = Lookup[Definition](ctx, importFrom.moduleName+"."+importFrom.item)
+		if err != nil {
+			return null, nil, err
+		}
+		otherModule = module.database.modules[importFrom.moduleName]
+	}
+	value, ok := def.(T)
+	if !ok {
+		return null, nil, asn1core.NewUnexpectedError("definition %s is not a %s", name, reflect.TypeFor[T]().Name())
+	}
+	return value, otherModule, nil
 }

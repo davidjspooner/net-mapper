@@ -10,7 +10,6 @@ import (
 
 type Type interface {
 	Definition
-	compile(ctx context.Context) error
 	readDefinition(ctx context.Context, s mibtoken.Reader) error
 	readValue(ctx context.Context, s mibtoken.Reader) (Value, error)
 }
@@ -83,7 +82,7 @@ func (simpleType *SimpleType) Source() mibtoken.Source {
 	return simpleType.source
 }
 
-func (simpleType *SimpleType) compile(ctx context.Context) error {
+func (simpleType *SimpleType) compileValue(ctx context.Context, module *Module) error {
 	ok := slices.Contains(simpleTypeNames, simpleType.ident.String())
 	if !ok {
 		return simpleType.ident.WrapError(asn1core.NewUnexpectedError("KNOWNTYPE", simpleType.ident.String(), "SimpleType.readDefinition"))
@@ -136,10 +135,6 @@ var _ Type = (*sequenceType)(nil)
 
 func (sequenceType *sequenceType) Source() mibtoken.Source {
 	return sequenceType.source
-}
-
-func (sequenceType *sequenceType) compile(ctx context.Context) error {
-	return nil
 }
 
 func (sequenceType *sequenceType) readDefinition(ctx context.Context, s mibtoken.Reader) error {
@@ -308,16 +303,6 @@ func (choiceType *choiceType) readDefinition(ctx context.Context, s mibtoken.Rea
 
 func (choiceType *choiceType) Source() mibtoken.Source {
 	return choiceType.source
-}
-
-func (choiceType *choiceType) compile(ctx context.Context) error {
-	for _, alt := range choiceType.alternatives {
-		err := alt.compile(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (choiceType *choiceType) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
