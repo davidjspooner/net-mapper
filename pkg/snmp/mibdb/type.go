@@ -202,7 +202,7 @@ func (sequenceType *sequenceType) readValue(ctx context.Context, s mibtoken.Read
 			if defStr == "empty" {
 				return nil
 			}
-			typeReader, err := Lookup[Type](ctx, defStr)
+			typeReader, _, err := Lookup[Type](ctx, defStr)
 			if err != nil {
 				return mibtoken.WrapError(s, err)
 			}
@@ -281,7 +281,7 @@ func (choiceType *choiceType) readDefinition(ctx context.Context, s mibtoken.Rea
 			if err != nil {
 				return err
 			}
-			typeDef, err := Lookup[Type](ctx, typeName.String())
+			typeDef, _, err := Lookup[Type](ctx, typeName.String())
 			if err != nil {
 				return err
 			}

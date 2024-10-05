@@ -62,10 +62,6 @@ func (mibMacro *MacroDefintion) Source() mibtoken.Source {
 	return mibMacro.source
 }
 
-func (mibMacro *MacroDefintion) compile(ctx context.Context) error {
-	return nil
-}
-
 func (mibMacro *MacroDefintion) Name() string {
 	return mibMacro.name
 }
@@ -76,8 +72,8 @@ func (mibMacro *MacroDefintion) String() string {
 
 func (mibMacro *MacroDefintion) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
 
-	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, error) {
-		return mibMacro.fields[name], nil
+	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
+		return mibMacro.fields[name], nil, nil
 	})
 
 	typeNotation := mibMacro.fields["TYPE NOTATION"]

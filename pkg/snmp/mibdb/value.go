@@ -16,6 +16,7 @@ type Value interface {
 // ------------------------------------
 
 type OidValue struct {
+	module     *Module
 	elements   []string
 	metaTokens *mibtoken.List
 	source     mibtoken.Source
@@ -80,7 +81,7 @@ func (value *OidValue) compileValue(ctx context.Context, module *Module) error {
 		case "iso":
 			value.compiled = append(value.compiled, 1)
 		default:
-			otherDefintion, otherModule, err := LookupInModule[Definition](ctx, module, element)
+			otherDefintion, otherModule, err := Lookup[Definition](ctx, element)
 			if err != nil {
 				return value.source.WrapError(err)
 			}
@@ -142,10 +143,6 @@ func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 
 func (value *ConstantValue) Source() mibtoken.Source {
 	return value.source
-}
-
-func (value *ConstantValue) compile(_ context.Context) error {
-	return nil
 }
 
 // ------------------------------------

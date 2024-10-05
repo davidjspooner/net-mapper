@@ -47,7 +47,7 @@ func (mdd *Definer[T]) Source() mibtoken.Source {
 	return builtInPosition
 }
 
-type lookupFunc func(ctx context.Context, name string) (Definition, error)
+type lookupFunc func(ctx context.Context, name string) (Definition, *Module, error)
 
 type lookuper struct {
 	prev *lookuper
@@ -67,21 +67,21 @@ func withContext(ctx context.Context, fn lookupFunc) context.Context {
 	return ctx
 }
 
-func Lookup[T any](ctx context.Context, name string) (T, error) {
+func Lookup[T any](ctx context.Context, name string) (T, *Module, error) {
 	var null T
 	if v := ctx.Value(lookupKey); v != nil {
 		l := v.(*lookuper)
 		for l != nil {
-			d, err := l.fn(ctx, name)
+			d, m, err := l.fn(ctx, name)
 			if err == nil && d != nil {
 				t, ok := d.(T)
 				if ok {
-					return t, nil
+					return t, m, nil
 				}
-				return null, fmt.Errorf("definition %T does not implment %s", d, reflect.TypeFor[T]().String())
+				return null, m, fmt.Errorf("definition %T does not implment %s", d, reflect.TypeFor[T]().String())
 			}
 			l = l.prev
 		}
 	}
-	return null, fmt.Errorf("unknown definition %q", name)
+	return null, nil, fmt.Errorf("unknown definition %q", name)
 }

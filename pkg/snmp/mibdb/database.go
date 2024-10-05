@@ -2,31 +2,44 @@ package mibdb
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path"
 	"slices"
 	"strings"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
 type Database struct {
-	modules     map[string]*Module
-	filenames   []string
-	definitions map[string]Definition
+	modules   map[string]*Module
+	filenames []string
+	root      oidBranch
 }
+
+const builtInModuleName = "<builtin>"
 
 func New() *Database {
 	d := &Database{
+		modules: make(map[string]*Module),
+	}
+
+	builtin := &Module{
+		database:    d,
+		name:        builtInModuleName,
+		imports:     make(map[string]reference),
+		exports:     nil,
 		definitions: make(map[string]Definition),
-		modules:     make(map[string]*Module),
 	}
+	d.modules["<builtin>"] = builtin
+
+	ctx := builtin.withContext(context.Background())
+
 	for _, simpleType := range simpleTypeNames {
-		d.definitions[simpleType] = &SimpleType{ident: mibtoken.New(simpleType, builtInPosition)}
+		builtin.definitions[simpleType] = &SimpleType{ident: mibtoken.New(simpleType, builtInPosition)}
 	}
-	d.definitions["iso"] = d.MustReadBuiltInValue(mibtoken.Object_Identifier, "{ 1 }")
+	builtin.definitions["iso"] = d.MustReadBuiltInValue(ctx, mibtoken.Object_Identifier, "{ 1 }")
 	return d
 }
 
@@ -57,16 +70,6 @@ func (d *Database) AddDirectory(dir string) error {
 		}
 	}
 	return nil
-}
-
-func (d *Database) withContext(ctx context.Context) context.Context {
-	return withContext(ctx, func(ctx context.Context, name string) (Definition, error) {
-		def, ok := d.definitions[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown definition %s", name)
-		}
-		return def, nil
-	})
 }
 
 func (d *Database) compileValues(ctx context.Context) error {
@@ -108,11 +111,12 @@ func (d *Database) compileValues(ctx context.Context) error {
 func (d *Database) readDefintions(ctx context.Context) error {
 	var errList asn1core.ErrorList
 	progress := true
+	var done []string
 	for progress {
 		errList = nil
 		progress = false
 		for _, f := range d.filenames {
-			if _, ok := d.modules[f]; ok {
+			if slices.Contains(done, f) {
 				continue
 			}
 			module, err := readModuleFromFile(ctx, d, f)
@@ -121,15 +125,8 @@ func (d *Database) readDefintions(ctx context.Context) error {
 				continue
 			}
 			d.modules[module.Name()] = module
+			done = append(done, f)
 			progress = true
-			exports, err := module.Exports()
-			if err != nil {
-				errList = append(errList, err)
-				continue
-			}
-			for name, def := range exports {
-				d.definitions[name] = def
-			}
 		}
 		if len(errList) == 0 {
 			break
@@ -143,11 +140,7 @@ func (d *Database) readDefintions(ctx context.Context) error {
 
 func (d *Database) CreateIndex(ctx context.Context) error {
 
-	ctx = d.withContext(ctx)
-
 	//read all the mibs ( but dont try and compile them yet)
-	d.modules = make(map[string]*Module)
-
 	err := d.readDefintions(ctx)
 	if err != nil {
 		return err
@@ -157,24 +150,25 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 		return err
 	}
 
-	for name, def := range d.definitions {
-		oid, ok := def.(*OidValue)
-		if !ok {
-			continue
+	for _, module := range d.modules {
+		for name, def := range module.definitions {
+			oid, ok := def.(*OidValue)
+			if !ok {
+				continue
+			}
+			d.root.addDefinition(oid.compiled, name, oid)
+			//TODO handle tables
 		}
-		d.addOidToIndex(ctx, name, oid)
 	}
-
 	return nil
 }
 
-func (d *Database) addOidToIndex(ctx context.Context, name string, oid *OidValue) {
-	fmt.Println(name, oid)
-	//TODO
+func (d *Database) FindOID(oid asn1go.OID) (string, Definition, asn1go.OID) {
+	return d.root.findOID(oid)
 }
 
 func readValue(ctx context.Context, typeName string, s mibtoken.Reader) (Value, error) {
-	valueType, err := Lookup[Type](ctx, typeName)
+	valueType, _, err := Lookup[Type](ctx, typeName)
 	if err != nil {
 		return nil, err
 	}
@@ -185,14 +179,13 @@ func readValue(ctx context.Context, typeName string, s mibtoken.Reader) (Value, 
 	return value, nil
 }
 
-func (d *Database) MustReadBuiltInValue(valueTypeName, text string) Value {
+func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text string) Value {
 	r := strings.NewReader(text)
 	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
 
 	if err != nil {
 		panic(err)
 	}
-	ctx := d.withContext(context.Background())
 	value, err := readValue(ctx, valueTypeName, s)
 	if err != nil {
 		panic(err)
