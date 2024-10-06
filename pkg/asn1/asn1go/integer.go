@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 //--------------------------------------------------------------------------------------------
@@ -13,11 +13,11 @@ import (
 type Integer []byte
 
 func (v *Integer) PackAsn1(params *asn1binary.Parameters) (asn1binary.Envelope, []byte, error) {
-	return asn1binary.Envelope{Tag: asn1core.TagInteger}, *v, nil
+	return asn1binary.Envelope{Tag: asn1binary.TagInteger}, *v, nil
 }
 func (v *Integer) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
-	if envelope.Tag != asn1core.TagInteger {
-		return asn1core.NewUnexpectedError(asn1core.TagInteger, envelope.Tag, "unexpected tag")
+	if envelope.Tag != asn1binary.TagInteger {
+		return asn1error.NewUnexpectedError(asn1binary.TagInteger, envelope.Tag, "unexpected tag")
 	}
 	*v = make([]byte, len(bytes))
 	copy(*v, bytes)
@@ -47,10 +47,10 @@ func (v *Integer) String() string {
 }
 func (v *Integer) GetInt(bits int) (int64, error) {
 	if bits > 64 {
-		return 0, asn1core.NewErrorf("too many bits for int64")
+		return 0, asn1error.NewErrorf("too many bits for int64")
 	}
 	if bits%8 != 0 {
-		return 0, asn1core.NewErrorf("bits must be a multiple of 8")
+		return 0, asn1error.NewErrorf("bits must be a multiple of 8")
 	}
 	if len(*v) == 0 {
 		return 0, nil
@@ -61,7 +61,7 @@ func (v *Integer) GetInt(bits int) (int64, error) {
 	bitsRead := 0
 	for i := len(*v) - 1; i >= 0; i-- {
 		if bitsRead >= bits && (negate && (*v)[i] != 0xFF || !negate && (*v)[i] != 0) {
-			return 0, asn1core.NewErrorf("integer is too large for %d bits", bits)
+			return 0, asn1error.NewErrorf("integer is too large for %d bits", bits)
 		}
 		n = n<<8 + int64((*v)[i])
 		bitsRead += 8

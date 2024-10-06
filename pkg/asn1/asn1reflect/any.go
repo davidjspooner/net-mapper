@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 )
 
@@ -13,7 +13,7 @@ type anyReflectHandler struct {
 
 func (sfh *anyReflectHandler) PackAsn1(reflectedValue *reflect.Value, params *asn1binary.Parameters) (asn1binary.Envelope, []byte, error) {
 	if reflectedValue.IsNil() {
-		return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("packing a NULL value for %s", reflectedValue.Type().String()).TODO()
+		return asn1binary.Envelope{}, nil, asn1error.NewUnimplementedError("packing a NULL value for %s", reflectedValue.Type().String()).TODO()
 	}
 	realValue := reflectedValue.Elem()
 	packer, err := getPackerForReflectedValue(realValue)
@@ -36,7 +36,7 @@ func (sfh *anyReflectHandler) UnpackAsn1(reflectedValue *reflect.Value, envelope
 			}
 			reflectedValue.Set(reflect.ValueOf(x))
 		}
-		return asn1core.NewErrorf("unpacking a NULL value for %s", reflectedValue.Type().String())
+		return asn1error.NewErrorf("unpacking a NULL value for %s", reflectedValue.Type().String())
 	}
 	realValue := reflectedValue.Elem()
 	unpacker, err := getUnpackerForReflectedValue(realValue)

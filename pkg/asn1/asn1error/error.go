@@ -1,4 +1,4 @@
-package asn1core
+package asn1error
 
 import (
 	"fmt"
@@ -15,117 +15,123 @@ const (
 	PanicError // eg a panic occurred
 )
 
-type Error interface {
+type Interface interface {
 	error
 	Type() ErrorType
 }
 
-type UnexpectedError[T any] struct {
+type Unexpected[T any] struct {
 	inner            error
 	units            string
 	errorType        ErrorType
 	expected, actual T
 }
 
-func (e *UnexpectedError[T]) Error() string {
+func (e *Unexpected[T]) Error() string {
 	if e.units == "" {
 		return fmt.Sprintf("asn1: %s: expected=%v, actual=%v", e.inner.Error(), e.expected, e.actual)
 	}
 	return fmt.Sprintf("asn1: %s: expected=%v %s, actual=%v %s", e.inner.Error(), e.expected, e.units, e.actual, e.units)
 }
 
-func (e *UnexpectedError[T]) Unwrap() error {
+func (e *Unexpected[T]) Unwrap() error {
 	return e.inner
 }
 
-func (e *UnexpectedError[T]) WithUnits(units string) *UnexpectedError[T] {
+func (e *Unexpected[T]) WithUnits(units string) *Unexpected[T] {
 	e.units = units
 	return e
 }
 
-func (e *UnexpectedError[T]) Type() ErrorType {
+func (e *Unexpected[T]) Type() ErrorType {
 	return e.errorType
 }
 
-func (e *UnexpectedError[T]) WithType(errorType ErrorType) *UnexpectedError[T] {
+func (e *Unexpected[T]) WithType(errorType ErrorType) *Unexpected[T] {
 	e.errorType = errorType
 	return e
 }
 
-func NewUnexpectedError[T any](expected, actual T, format string, args ...any) *UnexpectedError[T] {
-	return &UnexpectedError[T]{
+func NewUnexpectedError[T any](expected, actual T, format string, args ...any) *Unexpected[T] {
+	return &Unexpected[T]{
 		inner:    fmt.Errorf(format, args...),
 		expected: expected,
 		actual:   actual,
 	}
 }
 
-type UnsupportedGoTypeError struct {
+type UnsupportedGoType struct {
 	GoTypeName string
 }
 
-func (e *UnsupportedGoTypeError) Error() string {
+func (e *UnsupportedGoType) Error() string {
 	return fmt.Sprintf("asn1: unsupported Go type: %s", e.GoTypeName)
 }
 
-func (e *UnsupportedGoTypeError) Type() ErrorType {
+func (e *UnsupportedGoType) Type() ErrorType {
 	return StructuralError
 }
 
-func NewUnimplementedError(format string, args ...any) *GeneralError {
+func NewUnimplementedError(format string, args ...any) *General {
 	return NewErrorf("asn1: not implemented "+format, args...).WithType(ImplmentationError)
 }
 
-type GeneralError struct {
+type General struct {
 	inner error
 	cause error
 	eType ErrorType
 	Stack string
 }
 
-func NewErrorf(format string, args ...any) *GeneralError {
-	return &GeneralError{
+func NewErrorf(format string, args ...any) *General {
+	return &General{
 		inner: fmt.Errorf(format, args...),
 	}
 }
 
-func (e *GeneralError) Error() string {
+func Wrap(err error) *General {
+	return &General{
+		inner: err,
+	}
+}
+
+func (e *General) Error() string {
 	if e.cause != nil {
 		return fmt.Sprintf("%s: %s", e.inner.Error(), e.cause.Error())
 	}
 	return e.inner.Error()
 }
 
-func (e *GeneralError) Type() ErrorType {
+func (e *General) Type() ErrorType {
 	return e.eType
 }
 
-func (e *GeneralError) Unwrap() error {
+func (e *General) Unwrap() error {
 	return e.inner
 }
 
-func (e *GeneralError) WithType(eType ErrorType) *GeneralError {
+func (e *General) WithType(eType ErrorType) *General {
 	e.eType = eType
 	return e
 }
 
-func (e *GeneralError) WithCause(cause error) *GeneralError {
+func (e *General) WithCause(cause error) *General {
 	e.cause = cause
 	return e
 }
 
-func (e *GeneralError) WithStack() *GeneralError {
+func (e *General) WithStack() *General {
 	e.Stack = string(debug.Stack())
 	return e
 }
 
-func (e *GeneralError) TODO() *GeneralError {
+func (e *General) TODO() *General {
 	return e.WithType(FutureImplementationError).WithStack()
 }
 
-type ErrorList []error
+type List []error
 
-func (el ErrorList) Error() string {
+func (el List) Error() string {
 	if len(el) == 0 {
 		return ""
 	}

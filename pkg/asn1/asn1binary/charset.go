@@ -1,6 +1,6 @@
 package asn1binary
 
-import "github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+import "github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 
 type CharSetByteValidator [32 / 4]uint32
 
@@ -12,7 +12,7 @@ func (c *CharSetByteValidator) ValidateBytes(bytes []byte) error {
 	for _, r := range bytes {
 		n, mask := getIndexAndMask(r)
 		if c[n]&mask == 0 {
-			return asn1core.NewErrorf("invalid character %q", r)
+			return asn1error.NewErrorf("invalid character %q", r)
 		}
 	}
 	return nil

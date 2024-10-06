@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 )
 
@@ -41,8 +41,8 @@ func (i *integerReflectHandler) UnpackAsn1(reflectedValue *reflect.Value, envelo
 	return nil
 }
 func (i *integerReflectHandler) PackAsn1Duration(reflectedValue *reflect.Value, params *asn1binary.Parameters) (asn1binary.Envelope, []byte, error) {
-	return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("integerReflectHandler.PackAsn1Duration")
+	return asn1binary.Envelope{}, nil, asn1error.NewUnimplementedError("integerReflectHandler.PackAsn1Duration")
 }
 func (i *integerReflectHandler) UnpackAsn1Duration(reflectedValue *reflect.Value, envelope asn1binary.Envelope, bytes []byte) error {
-	return asn1core.NewUnimplementedError("integerReflectHandler.UnpackAsn1Duration")
+	return asn1error.NewUnimplementedError("integerReflectHandler.UnpackAsn1Duration")
 }

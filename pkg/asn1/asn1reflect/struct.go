@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 type fieldsHelper struct {
@@ -40,7 +40,7 @@ func fieldHelperFor(rType reflect.Type) (*fieldsHelper, error) {
 	}
 
 	if len(helper.fields) == 0 {
-		return nil, asn1core.NewUnimplementedError("no fields")
+		return nil, asn1error.NewUnimplementedError("no fields")
 	}
 	helper.hasEnvelope = (helper.fields[0].Type == envelopeType)
 
@@ -61,7 +61,7 @@ func (sfh *structFieldHandler) PackAsn1(reflectedValue *reflect.Value, params *a
 	rType := reflectedValue.Type()
 	fieldsHelper, err := fieldHelperFor(rType)
 	if err != nil {
-		return asn1binary.Envelope{}, nil, asn1core.NewErrorf("preparing to unpack into %s", reflectedValue.Type()).WithCause(err)
+		return asn1binary.Envelope{}, nil, asn1error.NewErrorf("preparing to unpack into %s", reflectedValue.Type()).WithCause(err)
 	}
 
 	i := 0
@@ -70,9 +70,9 @@ func (sfh *structFieldHandler) PackAsn1(reflectedValue *reflect.Value, params *a
 		i++
 		e = reflectedValue.Field(0).Interface().(asn1binary.Envelope)
 	}
-	err = e.UpdatePer(params)
+	err = params.Update(&e)
 	if err != nil {
-		return asn1binary.Envelope{}, nil, asn1core.NewErrorf("using envelope from struct").WithCause(err)
+		return asn1binary.Envelope{}, nil, asn1error.NewErrorf("using envelope from struct").WithCause(err)
 	}
 
 	b := bytes.Buffer{}
@@ -82,17 +82,17 @@ func (sfh *structFieldHandler) PackAsn1(reflectedValue *reflect.Value, params *a
 		fieldParams := fieldsHelper.params[i]
 		packer, err := getPackerForReflectedValue(fieldValue)
 		if err != nil {
-			return asn1binary.Envelope{}, nil, asn1core.NewErrorf("packing field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1binary.Envelope{}, nil, asn1error.NewErrorf("packing field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 
 		asn1Value.Envelope, asn1Value.Bytes, err = packer.PackAsn1(fieldParams)
 		if err != nil {
-			return asn1binary.Envelope{}, nil, asn1core.NewErrorf("packing field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1binary.Envelope{}, nil, asn1error.NewErrorf("packing field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 		i++
 		elemChunk, err := asn1Value.Marshal()
 		if err != nil {
-			return asn1binary.Envelope{}, nil, asn1core.NewErrorf("marshalling field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1binary.Envelope{}, nil, asn1error.NewErrorf("marshalling field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 		b.Write(elemChunk)
 	}
@@ -102,7 +102,7 @@ func (sfh *structFieldHandler) UnpackAsn1(reflectedValue *reflect.Value, envelop
 	rType := reflectedValue.Type()
 	fieldsHelper, err := fieldHelperFor(rType)
 	if err != nil {
-		return asn1core.NewErrorf("preparing to unpack into %s", reflectedValue.Type()).WithCause(err)
+		return asn1error.NewErrorf("preparing to unpack into %s", reflectedValue.Type()).WithCause(err)
 
 	}
 
@@ -110,40 +110,40 @@ func (sfh *structFieldHandler) UnpackAsn1(reflectedValue *reflect.Value, envelop
 	if fieldsHelper.hasEnvelope {
 		i++
 		reflectedValue.Field(0).Set(reflect.ValueOf(envelope))
-		err = envelope.ValidateWith(fieldsHelper.params[0])
+		err = fieldsHelper.params[0].Validate(&envelope)
 		if err != nil {
-			return asn1core.NewErrorf("updating envelope in struct").WithCause(err)
+			return asn1error.NewErrorf("updating envelope in struct").WithCause(err)
 		}
 	}
 
 	var asn1Value asn1binary.Value
 	for len(bytes) > 0 {
 		if i >= len(fieldsHelper.fields) {
-			return asn1core.NewUnexpectedError(len(fieldsHelper.fields), i+1, "too many elements")
+			return asn1error.NewUnexpectedError(len(fieldsHelper.fields), i+1, "too many elements")
 		}
 		tail, err := asn1Value.Unmarshal(bytes)
 		if err != nil {
-			return asn1core.NewErrorf("unmarshalling field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1error.NewErrorf("unmarshalling field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 		fieldParams := fieldsHelper.params[i]
 		field := reflectedValue.Field(i)
 		unpacker, err := getUnpackerForReflectedValue(field)
 		if err != nil {
-			return asn1core.NewErrorf("choosing unpacking for field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1error.NewErrorf("choosing unpacking for field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
-		err = asn1Value.Envelope.ValidateWith(fieldParams)
+		err = fieldParams.Validate(&asn1Value.Envelope)
 		if err != nil {
-			return asn1core.NewErrorf("validating field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1error.NewErrorf("validating field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 		err = unpacker.UnpackAsn1(asn1Value.Envelope, asn1Value.Bytes)
 		if err != nil {
-			return asn1core.NewErrorf("unpacking field %q", fieldsHelper.fields[i].Name).WithCause(err)
+			return asn1error.NewErrorf("unpacking field %q", fieldsHelper.fields[i].Name).WithCause(err)
 		}
 		i++
 		bytes = tail
 	}
 	if i < len(fieldsHelper.fields) {
-		return asn1core.NewUnexpectedError(len(fieldsHelper.fields), i, "too few elements")
+		return asn1error.NewUnexpectedError(len(fieldsHelper.fields), i, "too few elements")
 	}
 
 	return nil

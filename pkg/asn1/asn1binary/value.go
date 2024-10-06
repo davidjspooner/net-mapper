@@ -3,7 +3,7 @@ package asn1binary
 import (
 	"io"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 type Value struct {
@@ -41,29 +41,29 @@ func (v *Value) Marshal() ([]byte, error) {
 
 func (v *Value) Unmarshal(data []byte) ([]byte, error) {
 	if len(data) < 2 {
-		return nil, asn1core.NewUnexpectedError[int](2, len(data), "envelope truncated").WithUnits("byte(s)")
+		return nil, asn1error.NewUnexpectedError[int](2, len(data), "envelope truncated").WithUnits("byte(s)")
 	}
 	encodedClassAndBytes := data[0]
-	v.Class = asn1core.Class(encodedClassAndBytes >> 6)
-	v.Tag = asn1core.Tag(encodedClassAndBytes & 0x3F)
+	v.Class = Class(encodedClassAndBytes >> 6)
+	v.Tag = Tag(encodedClassAndBytes & 0x3F)
 	length := int(data[1])
 	if length < 128 {
 		if len(data) < 2+length {
-			return nil, asn1core.NewUnexpectedError[int](2+length, len(data), "frame truncated").WithUnits("byte(s)")
+			return nil, asn1error.NewUnexpectedError[int](2+length, len(data), "frame truncated").WithUnits("byte(s)")
 		}
 		v.Bytes = data[2 : 2+length]
 		return data[2+length:], nil
 	}
 	byteCount := length & 0x7F
 	if len(data) < 2+byteCount {
-		return nil, asn1core.NewUnexpectedError[int](2+byteCount, len(data), "envelope(long) truncated").WithUnits("byte(s)")
+		return nil, asn1error.NewUnexpectedError[int](2+byteCount, len(data), "envelope(long) truncated").WithUnits("byte(s)")
 	}
 	length = 0
 	for i := 0; i < byteCount; i++ {
 		length |= int(data[1+byteCount-i]) << (i * 8)
 	}
 	if len(data) < 2+byteCount+length {
-		return nil, asn1core.NewUnexpectedError[int](2+length, len(data), "frame(long) truncated").WithUnits("byte(s)")
+		return nil, asn1error.NewUnexpectedError[int](2+length, len(data), "frame(long) truncated").WithUnits("byte(s)")
 	}
 	v.Bytes = data[2+byteCount : 2+byteCount+length]
 	return data[2+byteCount+length:], nil
@@ -80,10 +80,10 @@ func (v *Value) ReadFrom(r io.Reader) (totalRead int64, err error) {
 		return totalRead, err
 	}
 	if chunkRead != 2 {
-		return totalRead, asn1core.NewUnexpectedError[int](2, chunkRead, "envelope truncated").WithUnits("byte(s)")
+		return totalRead, asn1error.NewUnexpectedError[int](2, chunkRead, "envelope truncated").WithUnits("byte(s)")
 	}
-	v.Class = asn1core.Class(envelope[0] >> 6)
-	v.Tag = asn1core.Tag(envelope[0] & 0x3F)
+	v.Class = Class(envelope[0] >> 6)
+	v.Tag = Tag(envelope[0] & 0x3F)
 	if envelope[1] < 128 {
 		v.Bytes = make([]byte, envelope[1])
 		chunkRead, err = r.Read(v.Bytes)
@@ -92,13 +92,13 @@ func (v *Value) ReadFrom(r io.Reader) (totalRead int64, err error) {
 			return totalRead, err
 		}
 		if chunkRead != int(envelope[1]) {
-			return totalRead, asn1core.NewUnexpectedError[int](int(envelope[1]), int(totalRead), "frame truncated").WithUnits("byte(s)")
+			return totalRead, asn1error.NewUnexpectedError[int](int(envelope[1]), int(totalRead), "frame truncated").WithUnits("byte(s)")
 		}
 		return totalRead, nil
 	}
 	byteCount := envelope[1] & 0x7F
 	if byteCount > 6 {
-		return totalRead, asn1core.NewErrorf("invalid length encoding")
+		return totalRead, asn1error.NewErrorf("invalid length encoding")
 	}
 	var lengthBytes [6]byte
 	chunkRead, err = r.Read(lengthBytes[:byteCount])
@@ -107,7 +107,7 @@ func (v *Value) ReadFrom(r io.Reader) (totalRead int64, err error) {
 		return totalRead, err
 	}
 	if chunkRead != int(byteCount) {
-		return totalRead, asn1core.NewUnexpectedError[int](int(byteCount), chunkRead, "envelope(long) truncated").WithUnits("byte(s)")
+		return totalRead, asn1error.NewUnexpectedError[int](int(byteCount), chunkRead, "envelope(long) truncated").WithUnits("byte(s)")
 	}
 	length := 0
 
@@ -121,7 +121,7 @@ func (v *Value) ReadFrom(r io.Reader) (totalRead int64, err error) {
 		return totalRead, err
 	}
 	if chunkRead != length {
-		return totalRead, asn1core.NewUnexpectedError[int](length, chunkRead, "frame(long) truncated").WithUnits("byte(s)")
+		return totalRead, asn1error.NewUnexpectedError[int](length, chunkRead, "frame(long) truncated").WithUnits("byte(s)")
 	}
 	return totalRead, nil
 }
@@ -130,7 +130,7 @@ var _ Packer = &Value{}
 var _ Unpacker = &Value{}
 
 func (v *Value) PackAsn1(params *Parameters) (Envelope, []byte, error) {
-	err := v.Envelope.ValidateWith(params)
+	err := params.Validate(&v.Envelope)
 	if err != nil {
 		return Envelope{}, nil, err
 	}
@@ -144,7 +144,7 @@ func (v *Value) UnpackAsn1(envelope Envelope, bytes []byte) error {
 }
 
 func (value *Value) UnpackIntoGoWithParameters(i any, params *Parameters) error {
-	err := value.Envelope.ValidateWith(params)
+	err := params.Validate(&value.Envelope)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (value *Value) PackFromGoWithParameters(i any, params *Parameters) error {
 		return err
 	}
 	if params != nil {
-		err = value.Envelope.UpdatePer(params)
+		err = params.Update(&value.Envelope)
 		if err != nil {
 			return err
 		}

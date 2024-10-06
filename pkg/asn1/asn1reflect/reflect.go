@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 var reflectedPackableType = reflect.TypeFor[asn1binary.Packer]()
@@ -41,7 +41,7 @@ func getHandlerFor(rType reflect.Type) (reflectHandler, error) {
 
 	kind := rType.Kind()
 	if kind <= reflect.Invalid || kind >= reflect.UnsafePointer {
-		return nil, asn1core.NewUnimplementedError("unsupported %s", kind.String())
+		return nil, asn1error.NewUnimplementedError("unsupported %s", kind.String())
 	}
 	handler := mapReflectHandler[kind]
 	if handler == nil {
@@ -51,7 +51,7 @@ func getHandlerFor(rType reflect.Type) (reflectHandler, error) {
 		case reflect.Slice:
 			handler = newSliceReflectHandler(rType)
 		default:
-			return nil, asn1core.NewUnimplementedError("unsupported type %s", rType.String())
+			return nil, asn1error.NewUnimplementedError("unsupported type %s", rType.String())
 		}
 	}
 	handlerTypeCache[rType] = handler
@@ -81,7 +81,7 @@ func getPackerForReflectedValue(reflectedValue reflect.Value) (asn1binary.Packer
 	}
 	for reflectedValue.Kind() == reflect.Ptr {
 		if reflectedValue.IsNil() {
-			return nil, asn1core.NewUnimplementedError("cannot pack a NULL value for %s", reflectedValue.Type().String()).TODO()
+			return nil, asn1error.NewUnimplementedError("cannot pack a NULL value for %s", reflectedValue.Type().String()).TODO()
 		}
 		reflectedValue = reflectedValue.Elem()
 	}
@@ -117,7 +117,7 @@ func getUnpackerForReflectedValue(reflectedValue reflect.Value) (asn1binary.Unpa
 		reflectedValue = reflectedValue.Elem()
 	}
 	if !reflectedValue.CanSet() {
-		return nil, asn1core.NewErrorf("cannot unpack into a non-settable value - %s", reflectedValue.Type().String()).WithType(asn1core.StructuralError)
+		return nil, asn1error.NewErrorf("cannot unpack into a non-settable value - %s", reflectedValue.Type().String()).WithType(asn1error.StructuralError)
 	}
 	handler, err := getHandlerFor(reflectedValue.Type())
 	if err != nil {

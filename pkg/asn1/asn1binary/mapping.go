@@ -1,9 +1,10 @@
-package asn1core
+package asn1binary
 
 import (
 	"fmt"
 	"strings"
 
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"golang.org/x/exp/constraints"
 )
 
@@ -53,7 +54,7 @@ func (m *mapping[T]) Add(name string, val T) {
 func (m *mapping[T]) Name(val T) (string, error) {
 	p, ok := m.valMap[val]
 	if !ok {
-		return "", NewErrorf("unknown value %d", val)
+		return "", asn1error.NewErrorf("unknown value %d", val)
 	}
 	return p.name, nil
 }
@@ -63,7 +64,7 @@ func (m *mapping[T]) Value(name string) (T, error) {
 	p, ok := m.nameMap[lname]
 	if !ok {
 		var null T
-		return null, NewErrorf("unknown name %s", name)
+		return null, asn1error.NewErrorf("unknown name %s", name)
 	}
 	return p.val, nil
 }

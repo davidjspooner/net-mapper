@@ -1,6 +1,4 @@
-package asn1core
-
-import "fmt"
+package asn1binary
 
 type Tag int
 
@@ -62,25 +60,9 @@ func init() {
 	//tagMap.Add("SequenceOf", TagSequenceOf)
 }
 
-func (t Tag) String() string {
-	name, err := tagMap.Name(t)
-	if err == nil {
-		return name
-	}
-	constructed, baseTag := t.IsConstructed()
-	if constructed {
-		name, err := tagMap.Name(baseTag)
-		if err == nil {
-			return name + fmt.Sprintf("( constructed 0x%02X )", int(t))
-		}
-	}
-	return fmt.Sprintf("tag=%02X", int(t))
-}
-
 func (t Tag) IsConstructed() (bool, Tag) {
 	return t&Constructed != 0, t &^ Constructed
 }
-
 
 func ParseTag(tag string) (Tag, error) {
 	return tagMap.Value(tag)

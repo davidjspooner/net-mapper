@@ -1,4 +1,4 @@
-package asn1core
+package asn1binary
 
 import "fmt"
 

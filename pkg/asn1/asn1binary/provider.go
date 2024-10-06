@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 var lock sync.RWMutex
@@ -58,10 +58,10 @@ func GetPackerFor(i any) (Packer, error) {
 	}
 
 	if len(providers) == 0 {
-		return nil, asn1core.NewErrorf("no packer providers registered")
+		return nil, asn1error.NewErrorf("no packer providers registered")
 	}
 
-	return nil, asn1core.NewErrorf("no packer found for %T", i)
+	return nil, asn1error.NewErrorf("no packer found for %T", i)
 }
 
 func GetUnpackerFor(i any) (Unpacker, error) {
@@ -74,7 +74,7 @@ func GetUnpackerFor(i any) (Unpacker, error) {
 		}
 	}
 	if len(providers) == 0 {
-		return nil, asn1core.NewErrorf("no packer providers registered")
+		return nil, asn1error.NewErrorf("no packer providers registered")
 	}
-	return nil, asn1core.NewErrorf("no packer found for %T", i)
+	return nil, asn1error.NewErrorf("no packer found for %T", i)
 }

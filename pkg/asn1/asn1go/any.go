@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 type Any struct {
@@ -43,18 +43,18 @@ func (v *Any) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
 	}
 
 	switch envelope.Tag {
-	case asn1core.TagBoolean:
+	case asn1binary.TagBoolean:
 		v.Elem = new(bool)
-	case asn1core.TagOctetString:
+	case asn1binary.TagOctetString:
 		v.Elem = new(OctetString)
-	case asn1core.TagIA5String, asn1core.TagPrintableString, asn1core.TagUTF8String:
+	case asn1binary.TagIA5String, asn1binary.TagPrintableString, asn1binary.TagUTF8String:
 		v.Elem = new(string)
-	case asn1core.TagNull:
+	case asn1binary.TagNull:
 		v.Elem = new(Null)
-	case asn1core.TagSequence:
+	case asn1binary.TagSequence:
 		v.Elem = new(Sequence[Any])
 	default:
-		return asn1core.NewUnimplementedError("Any.UnpackAsn1 tag %s", envelope.Tag)
+		return asn1error.NewUnimplementedError("Any.UnpackAsn1 tag %s", envelope.Tag)
 	}
 	unpacker, err := asn1binary.GetUnpackerFor(v.Elem)
 	if err != nil {

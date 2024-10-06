@@ -2,7 +2,7 @@ package asn1go
 
 import (
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 type String struct {
@@ -21,22 +21,22 @@ func (v *String) PackAsn1(params *asn1binary.Parameters) (asn1binary.Envelope, [
 		}
 	}
 	switch e.Tag {
-	case asn1core.TagUTF8String:
+	case asn1binary.TagUTF8String:
 		return e, []byte(v.Elem), nil
-	case asn1core.TagBMPString:
+	case asn1binary.TagBMPString:
 		b := make([]byte, 0, len(v.Elem)*2)
 		for _, r := range v.Elem {
 			b = append(b, byte(r>>8), byte(r))
 		}
 		return e, b, nil
-	case asn1core.TagPrintableString:
+	case asn1binary.TagPrintableString:
 		b := []byte(v.Elem)
 		err := asn1binary.PrintableStringValidator.ValidateBytes(b)
 		if err != nil {
 			return asn1binary.Envelope{}, nil, err
 		}
 		return e, b, nil
-	case asn1core.TagIA5String:
+	case asn1binary.TagIA5String:
 		b := []byte(v.Elem)
 		err := asn1binary.IA5StringValidator.ValidateBytes(b)
 		if err != nil {
@@ -44,29 +44,29 @@ func (v *String) PackAsn1(params *asn1binary.Parameters) (asn1binary.Envelope, [
 		}
 		return e, b, nil
 	}
-	return asn1binary.Envelope{}, nil, asn1core.NewUnimplementedError("cannot pack string as tag %s", e.Tag)
+	return asn1binary.Envelope{}, nil, asn1error.NewUnimplementedError("cannot pack string as tag %s", e.Tag)
 }
 func (v *String) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
 	switch envelope.Tag {
-	case asn1core.TagUTF8String:
+	case asn1binary.TagUTF8String:
 		v.Elem = string(bytes)
-	case asn1core.TagPrintableString:
+	case asn1binary.TagPrintableString:
 		err := asn1binary.PrintableStringValidator.ValidateBytes(bytes)
 		if err != nil {
 			return err
 		}
 		v.Elem = string(bytes)
-	case asn1core.TagOctetString:
+	case asn1binary.TagOctetString:
 		v.Elem = string(bytes)
-	case asn1core.TagIA5String:
+	case asn1binary.TagIA5String:
 		err := asn1binary.IA5StringValidator.ValidateBytes(bytes)
 		if err != nil {
 			return err
 		}
 		v.Elem = string(bytes)
-	case asn1core.TagBMPString:
+	case asn1binary.TagBMPString:
 		if len(bytes)%2 != 0 {
-			return asn1core.NewErrorf("BMPString length is not even")
+			return asn1error.NewErrorf("BMPString length is not even")
 		}
 		s := make([]rune, len(bytes)/2)
 		for i := 0; i < len(bytes)/2; i++ {
@@ -74,7 +74,7 @@ func (v *String) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
 		}
 		v.Elem = string(s)
 	default:
-		return asn1core.NewUnimplementedError("cannot unpack string from tag %s", envelope.Tag)
+		return asn1error.NewUnimplementedError("cannot unpack string from tag %s", envelope.Tag)
 	}
 	return nil
 }
