@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/snmp"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibdb"
 )
@@ -26,20 +26,6 @@ func ReadAllMibs(ctx context.Context, dirname string) (*mibdb.Database, error) {
 	return db, nil
 }
 
-func DecodeOIDAncVar(db *mibdb.Database, oid asn1go.OID, value asn1binary.Value) error {
-	name, def, tail := db.FindOID(oid)
-	if def == nil {
-		fmt.Printf("             OID: %s Value: %v\n", oid.String(), value)
-		return nil
-	}
-	if len(tail) == 1 && tail[0] == 0 {
-		fmt.Printf("             OID: %s Value: %v\n", name, value)
-		return nil
-	}
-	fmt.Printf("             OID: %s.%s Value: %v\n", name, tail.String(), value)
-	return nil
-}
-
 func DecodeDump(filename string, db *mibdb.Database) error {
 	community := "public"
 	//oid := asn1.ObjectIdentifier{1, 3, 6, 1, 2, 1, 1, 1, 0} // Replace with your OID
@@ -49,6 +35,8 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 		fmt.Printf("Error creating SNMP protocol: %v\n", err)
 		return err
 	}
+
+	metricDecoder := snmp.NewMetricPrinter(os.Stdout, db)
 
 	err = PlaybackIpFramesFromFile("/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", IPFrameHandleFunc(func(frame *IPFrame) error {
 		if frame.IsFragment {
@@ -94,10 +82,16 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 		// 	fmt.Printf("      ErrorIndex: %d\n", message.PDU.ErrorIndex)
 		// }
 		for _, vb := range message.PDU.VarBinds {
-			DecodeOIDAncVar(db, vb.OID, vb.Value)
+			err := metricDecoder.Handle(&vb)
+			if err != nil {
+				return err
+			}
 		}
-		return nil
+		return err
 	}))
+	if err == nil {
+		err = metricDecoder.Flush()
+	}
 	return err
 }
 
@@ -107,14 +101,19 @@ func main() {
 	db, err := ReadAllMibs(ctx, "/mnt/homelab-atom/static/mib/")
 
 	if err != nil {
-		errors, multiError := err.(asn1core.ErrorList)
+		list, multiError := err.(asn1error.List)
 		if multiError {
-			for _, e := range errors {
+			for _, e := range list {
 				fmt.Printf("Error: %v\n", e)
+				var general *asn1error.General
+				if errors.As(e, &general) {
+					fmt.Println(general.Stack)
+				}
 			}
 		} else {
 			fmt.Printf("Error: %v\n", err)
 		}
+		return
 	}
 
 	DecodeDump("/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)

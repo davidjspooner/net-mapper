@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
@@ -15,7 +15,7 @@ import (
 type Database struct {
 	modules   map[string]*Module
 	filenames []string
-	root      oidBranch
+	root      OidBranch
 }
 
 const builtInModuleName = "<builtin>"
@@ -74,7 +74,7 @@ func (d *Database) AddDirectory(dir string) error {
 
 func (d *Database) compileValues(ctx context.Context) error {
 	//compile all the values now that we have read them all
-	var errList asn1core.ErrorList
+	var errList asn1error.List
 
 	var compile []*Module
 	var failedCompile []*Module
@@ -92,7 +92,7 @@ func (d *Database) compileValues(ctx context.Context) error {
 		}
 		progress = false
 		for _, module := range compile {
-			err := module.compile(ctx)
+			err := module.compileValues(ctx)
 			if err != nil {
 				failedCompile = append(failedCompile, module)
 				errList = append(errList, err)
@@ -109,7 +109,7 @@ func (d *Database) compileValues(ctx context.Context) error {
 }
 
 func (d *Database) readDefintions(ctx context.Context) error {
-	var errList asn1core.ErrorList
+	var errList asn1error.List
 	progress := true
 	var done []string
 	for progress {
@@ -163,30 +163,22 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 	return nil
 }
 
-func (d *Database) FindOID(oid asn1go.OID) (string, Definition, asn1go.OID) {
+func (d *Database) FindOID(oid asn1go.OID) (*OidBranch, asn1go.OID) {
 	return d.root.findOID(oid)
-}
-
-func readValue(ctx context.Context, typeName string, s mibtoken.Reader) (Value, error) {
-	valueType, _, err := Lookup[Type](ctx, typeName)
-	if err != nil {
-		return nil, err
-	}
-	value, err := valueType.readValue(ctx, s)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text string) Value {
 	r := strings.NewReader(text)
 	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
-
+	builtin := d.modules["<builtin>"]
 	if err != nil {
 		panic(err)
 	}
-	value, err := readValue(ctx, valueTypeName, s)
+	valueType, _, err := Lookup[Type](ctx, valueTypeName)
+	if err != nil {
+		panic(err)
+	}
+	value, err := valueType.readValue(ctx, builtin, s)
 	if err != nil {
 		panic(err)
 	}
