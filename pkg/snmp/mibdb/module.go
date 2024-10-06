@@ -6,7 +6,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
@@ -62,18 +62,18 @@ func (module *Module) withContext(ctx context.Context) context.Context {
 		} else {
 			otherModule, ok = module.database.modules[importFrom.moduleName]
 			if !ok {
-				return nil, nil, asn1core.NewUnimplementedError("definition %s needs %s which has not been read yet", name, importFrom.moduleName)
+				return nil, nil, asn1error.NewUnimplementedError("definition %s needs %s which has not been read yet", name, importFrom.moduleName)
 			}
 		}
 		def, ok = otherModule.definitions[name]
 		if ok {
 			return def, otherModule, nil
 		}
-		return nil, nil, asn1core.NewUnimplementedError("definition %s not found in %s", name, otherModule.name)
+		return nil, nil, asn1error.NewUnimplementedError("definition %s not found in %s", name, otherModule.name)
 	})
 }
 
-func (module *Module) compile(ctx context.Context) error {
+func (module *Module) compileValues(ctx context.Context) error {
 	ctx = module.withContext(ctx)
 	for _, def := range module.definitions {
 		value, ok := def.(Value)
@@ -128,8 +128,9 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 			if metaTokens.Length() > 0 {
 				Type, _ := metaTokens.LookAhead(0)
 				if Type.String() == "MACRO" {
-					mibMacro := &MacroDefintion{name: name.String(), metaTokens: metaTokens, source: *name.Source()}
-					err = mibMacro.readDefinition(ctx, s)
+					mibMacro := &MacroDefintion{name: name.String()}
+					mibMacro.set(module, metaTokens, *name.Source())
+					err = mibMacro.readDefinition(ctx, module, s)
 					if err != nil {
 						return err
 					}
@@ -144,7 +145,8 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 			peekStr := peek.String()
 
 			if peekStr == "{" {
-				oid := &OidValue{metaTokens: metaTokens, source: *name.Source()}
+				oid := &OidValue{}
+				oid.set(module, metaTokens, *name.Source())
 				err = oid.readOid(ctx, s)
 				if err != nil {
 					return err
@@ -155,7 +157,8 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 
 			ttype := peek.Type()
 			if ttype == mibtoken.STRING || ttype == mibtoken.NUMBER {
-				mibType := &ConstantValue{metaTokens: metaTokens, source: *name.Source()}
+				mibType := &ConstantValue{}
+				mibType.set(module, metaTokens, *name.Source())
 				err = mibType.read(ctx, s)
 				if err != nil {
 					return err
@@ -165,8 +168,9 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 			}
 
 			if peekStr == "[" || slices.Contains(simpleTypeNames, peekStr) {
-				mibType := &SimpleType{metaTokens: metaTokens, source: *name.Source()}
-				err = mibType.readDefinition(ctx, s)
+				mibType := &SimpleType{}
+				mibType.set(module, metaTokens, *name.Source())
+				err = mibType.readDefinition(ctx, module, s)
 				if err != nil {
 					return err
 				}
@@ -189,7 +193,7 @@ func (module *Module) readValue(ctx context.Context, typeName string, s mibtoken
 	if err != nil {
 		return nil, err
 	}
-	value, err := valueType.readValue(ctx, s)
+	value, err := valueType.readValue(ctx, module, s)
 	if err != nil {
 		return nil, err
 	}

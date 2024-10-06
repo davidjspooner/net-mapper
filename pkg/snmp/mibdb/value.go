@@ -8,6 +8,49 @@ import (
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
+type valueBase struct {
+	module     *Module
+	metaTokens *mibtoken.List
+	source     mibtoken.Source
+}
+
+func (base *valueBase) set(module *Module, metaTokens *mibtoken.List, source mibtoken.Source) {
+	base.module = module
+	base.metaTokens = metaTokens
+	base.source = source
+}
+
+func (base *valueBase) compileMeta(ctx context.Context) error {
+	return nil
+	if base.metaTokens == nil || base.metaTokens.Length() == 0 {
+		return nil
+	}
+	copy := base.metaTokens.Clone()
+	tok, err := copy.Pop()
+	if err != nil {
+		return err
+	}
+	def, _, err := Lookup[Definition](ctx, tok.String())
+	if err != nil {
+		return nil
+	}
+	_, ok := def.(*SimpleType)
+	if ok {
+		return nil
+	}
+	macro, ok := def.(*MacroDefintion)
+	if ok {
+		value, err := macro.readValue(ctx, base.module, copy)
+		if err != nil {
+			return err
+		}
+		_ = value
+	}
+	return nil
+}
+
+// ------------------------------------
+
 type Value interface {
 	Definition
 	compileValue(ctx context.Context, module *Module) error
@@ -16,11 +59,9 @@ type Value interface {
 // ------------------------------------
 
 type OidValue struct {
-	module     *Module
-	elements   []string
-	metaTokens *mibtoken.List
-	source     mibtoken.Source
-	compiled   asn1go.OID
+	valueBase
+	elements []string
+	compiled asn1go.OID
 }
 
 var _ Definition = (*OidValue)(nil)
@@ -66,6 +107,10 @@ func (value *OidValue) Source() mibtoken.Source {
 }
 
 func (value *OidValue) compileValue(ctx context.Context, module *Module) error {
+	err := value.valueBase.compileMeta(ctx)
+	if err != nil {
+		return err
+	}
 	if len(value.compiled) > 0 {
 		return nil
 	}
@@ -109,9 +154,8 @@ func (value *OidValue) String() string {
 // ------------------------------------
 
 type ConstantValue struct {
-	elements   []string
-	metaTokens *mibtoken.List
-	source     mibtoken.Source
+	valueBase
+	elements []string
 }
 
 var _ Definition = (*ConstantValue)(nil)
@@ -148,10 +192,9 @@ func (value *ConstantValue) Source() mibtoken.Source {
 // ------------------------------------
 
 type structureValue struct {
-	source     mibtoken.Source
-	vType      Type
-	metaTokens *mibtoken.List
-	fields     map[string]Value
+	valueBase
+	vType  Type
+	fields map[string]Value
 }
 
 func (value *structureValue) Source() mibtoken.Source {
@@ -159,14 +202,18 @@ func (value *structureValue) Source() mibtoken.Source {
 }
 
 func (value *structureValue) compileValue(ctx context.Context, module *Module) error {
+	err := value.valueBase.compileMeta(ctx)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 // ------------------------------------
 
 type goValue[T any] struct {
-	value  T
-	source mibtoken.Source
+	valueBase
+	value T
 }
 
 var _ Value = (*goValue[string])(nil)
@@ -176,5 +223,9 @@ func (value *goValue[T]) Source() mibtoken.Source {
 }
 
 func (value *goValue[T]) compileValue(ctx context.Context, module *Module) error {
+	err := value.valueBase.compileMeta(ctx)
+	if err != nil {
+		return err
+	}
 	return nil
 }
