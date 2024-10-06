@@ -1,6 +1,10 @@
 package mibtoken
 
-import "github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+import (
+	"errors"
+
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
+)
 
 type Reader interface {
 	Pop() (*Token, error)
@@ -16,6 +20,10 @@ func ReadUntil(r Reader, end string) (*List, error) {
 	for {
 		tok, err := r.Pop()
 		if err != nil {
+			var general *asn1error.General
+			if errors.As(err, &general) {
+				return nil, general
+			}
 			return nil, err
 		}
 		if tok.IsText(end) {
@@ -32,7 +40,7 @@ func ReadExpected(s Reader, expectedTexts ...string) error {
 			return err
 		}
 		if actual.String() != expectedText {
-			return asn1core.NewUnexpectedError(expectedText, actual.String(), "token")
+			return asn1error.NewUnexpectedError(expectedText, actual.String(), "token")
 		}
 	}
 	return nil

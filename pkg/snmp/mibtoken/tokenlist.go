@@ -3,6 +3,8 @@ package mibtoken
 import (
 	"io"
 	"strings"
+
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 )
 
 type List struct {
@@ -37,7 +39,8 @@ func (tl *List) Pop() (*Token, error) {
 
 func (tl *List) LookAhead(n int) (*Token, error) {
 	if n >= len(tl.elements) {
-		return nil, EOFPosition(tl.source.Filename).WrapError(io.EOF)
+		err := asn1error.Wrap(io.EOF).WithStack()
+		return nil, EOFPosition(tl.source.Filename).WrapError(err)
 	}
 	return tl.elements[n], nil
 }
@@ -128,7 +131,7 @@ func (tl *List) ReadExpected(elems ...string) error {
 
 func (tl *List) Source() *Source {
 	if len(tl.elements) == 0 {
-		return EOFPosition(tl.Source().Filename)
+		return EOFPosition(tl.source.Filename)
 	}
 	return tl.elements[0].Source()
 }

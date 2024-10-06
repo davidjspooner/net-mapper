@@ -7,7 +7,7 @@ import (
 	"io"
 	"slices"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"golang.org/x/exp/constraints"
 )
 
@@ -223,7 +223,7 @@ func (s *Scanner) PopType(tType TokenType) (*Token, error) {
 	actual, err := s.Pop()
 	if err == nil {
 		if actual.Type() != tType {
-			err = actual.WrapError(asn1core.NewUnexpectedError(tType, actual.Type(), "token type"))
+			err = actual.WrapError(asn1error.NewUnexpectedError(tType, actual.Type(), "token type"))
 		}
 	}
 	return actual, err
