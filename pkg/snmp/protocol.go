@@ -9,7 +9,6 @@ import (
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
 )
 
 func init() {
@@ -90,14 +89,14 @@ func (p *protocol) DecodeFrame(frame []byte) (*Message, error) {
 	return &message, nil
 }
 
-func (p *protocol) EncodePDU(pType asn1core.Tag, pdu *PDU) ([]byte, error) {
+func (p *protocol) EncodePDU(pType asn1binary.Tag, pdu *PDU) ([]byte, error) {
 	msg := Message{
 		Version:   p.version,
 		Community: p.community,
 		PDU:       *pdu,
 	}
 	msg.PDU.Tag = pType
-	msg.PDU.Class = asn1core.ClassContextSpecific
+	msg.PDU.Class = asn1binary.ClassContextSpecific
 	bytes, err := asn1binary.Marshal(msg)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling SNMP message: %v", err)

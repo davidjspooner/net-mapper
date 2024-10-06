@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
 )
 
 type connection struct {
@@ -22,7 +22,7 @@ func (c *connection) Close() error {
 	return fmt.Errorf("connection already closed")
 }
 
-func (c *connection) Send(pType asn1core.Tag, pdu *PDU) error {
+func (c *connection) Send(pType asn1binary.Tag, pdu *PDU) error {
 
 	bytes, err := c.protocol.EncodePDU(pType, pdu)
 	if err != nil {
