@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
@@ -11,6 +12,7 @@ import (
 type valueBase struct {
 	module     *Module
 	metaTokens *mibtoken.List
+	metaValue  Value
 	source     mibtoken.Source
 }
 
@@ -21,20 +23,22 @@ func (base *valueBase) set(module *Module, metaTokens *mibtoken.List, source mib
 }
 
 func (base *valueBase) compileMeta(ctx context.Context) error {
-	return nil
-	if base.metaTokens == nil || base.metaTokens.Length() == 0 {
+	if base.metaTokens == nil || base.metaTokens.Length() == 0 || base.metaValue != nil {
 		return nil
 	}
-	copy := base.metaTokens.Clone()
+
+	copy := mibtoken.NewProjection(base.metaTokens)
 	tok, err := copy.Pop()
 	if err != nil {
 		return err
 	}
 	def, _, err := Lookup[Definition](ctx, tok.String())
 	if err != nil {
-		return nil
+		tokStr := tok.String()
+		Lookup[Definition](ctx, tokStr)
+		return tok.WrapError(err)
 	}
-	_, ok := def.(*SimpleType)
+	_, ok := def.(*TypeReference)
 	if ok {
 		return nil
 	}
@@ -44,7 +48,7 @@ func (base *valueBase) compileMeta(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_ = value
+		base.metaValue = value
 	}
 	return nil
 }
@@ -99,6 +103,7 @@ func (value *OidValue) readOid(_ context.Context, s mibtoken.Reader) error {
 		return nil
 	}
 	value.elements = append(value.elements, peek.String())
+	s.Pop()
 	return nil
 }
 
@@ -158,7 +163,7 @@ type ConstantValue struct {
 	elements []string
 }
 
-var _ Definition = (*ConstantValue)(nil)
+var _ Value = (*ConstantValue)(nil)
 
 func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 	value.source = *s.Source()
@@ -185,23 +190,54 @@ func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 	return nil
 }
 
+func (value *ConstantValue) compileValue(ctx context.Context, module *Module) error {
+	err := value.valueBase.compileMeta(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (value *ConstantValue) Source() mibtoken.Source {
 	return value.source
 }
 
 // ------------------------------------
 
-type structureValue struct {
+type ExpectedToken struct {
+	text string
+}
+
+func (expected *ExpectedToken) readValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error) {
+	peek, err := s.LookAhead(0)
+	if err != nil {
+		return nil, err
+	}
+	actual := peek.String()
+	if actual == expected.text {
+		s.Pop()
+		return nil, nil
+	}
+	if actual == "ACCESS" && expected.text == "MAX-ACCESS" {
+		s.Pop()
+		return nil, nil
+	}
+	return nil, peek.WrapError(asn1error.NewUnexpectedError(expected.text, actual, "mib token"))
+}
+
+// ------------------------------------
+
+type CompositeValue struct {
 	valueBase
 	vType  Type
 	fields map[string]Value
 }
 
-func (value *structureValue) Source() mibtoken.Source {
+func (value *CompositeValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *structureValue) compileValue(ctx context.Context, module *Module) error {
+func (value *CompositeValue) compileValue(ctx context.Context, module *Module) error {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
 		return err
@@ -226,6 +262,27 @@ func (value *goValue[T]) compileValue(ctx context.Context, module *Module) error
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+//--------------------------------------
+
+type ValueList []Value
+
+func (list ValueList) Source() mibtoken.Source {
+	if len(list) == 0 {
+		return mibtoken.Source{}
+	}
+	return list[0].Source()
+}
+
+func (list ValueList) compileValue(ctx context.Context, module *Module) error {
+	for _, value := range list {
+		err := value.compileValue(ctx, module)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -22,7 +22,7 @@ func ReadUntil(r Reader, end string) (*List, error) {
 		if err != nil {
 			var general *asn1error.General
 			if errors.As(err, &general) {
-				return nil, general
+				return nil, err
 			}
 			return nil, err
 		}

@@ -3,6 +3,8 @@ package asn1error
 import (
 	"fmt"
 	"runtime/debug"
+	"slices"
+	"strings"
 )
 
 type ErrorType int
@@ -131,6 +133,18 @@ func (e *General) TODO() *General {
 
 type List []error
 
+func (el List) Flatten() List {
+	flattened := List{}
+	for _, e := range el {
+		if l, ok := e.(List); ok {
+			flattened = append(flattened, l.Flatten()...)
+		} else {
+			flattened = append(flattened, e)
+		}
+	}
+	return flattened
+}
+
 func (el List) Error() string {
 	if len(el) == 0 {
 		return ""
@@ -138,12 +152,16 @@ func (el List) Error() string {
 	if len(el) == 1 {
 		return el[0].Error()
 	}
-	var s string
-	for i, e := range el {
-		if i > 0 {
-			s += "; "
+
+	flattened := el.Flatten()
+
+	sl := []string{}
+	for _, e := range flattened {
+		s := e.Error()
+		if slices.Contains(sl, s) {
+			continue
 		}
-		s += e.Error()
+		sl = append(sl, s)
 	}
-	return s
+	return strings.Join(sl, "; ")
 }

@@ -2,11 +2,12 @@ package mibtoken
 
 type Projection struct {
 	reader Reader
+	source Source
 	offset int
 }
 
 func NewProjection(reader Reader) *Projection {
-	return &Projection{reader: reader}
+	return &Projection{reader: reader, source: *reader.Source()}
 }
 
 var _ Reader = (*Projection)(nil)
@@ -21,12 +22,13 @@ func (p *Projection) Pop() (*Token, error) {
 }
 
 func (p *Projection) LookAhead(n int) (*Token, error) {
-	return p.reader.LookAhead(p.offset + n)
+	tok, err := p.reader.LookAhead(p.offset + n)
+	return tok, err
 }
 
 func (p *Projection) IsEOF() bool {
 	peek, err := p.LookAhead(0)
-	if err != nil {
+	if err != nil || peek == nil || peek.Type() == EOF {
 		return true
 	}
 	return peek == nil
@@ -35,7 +37,7 @@ func (p *Projection) IsEOF() bool {
 func (p *Projection) Source() *Source {
 	peek, err := p.LookAhead(0)
 	if err != nil {
-		return EOFPosition(p.reader.Source().Filename)
+		return &p.source
 	}
 	return peek.Source()
 }

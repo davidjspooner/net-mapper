@@ -128,6 +128,7 @@ func NewScanner(r io.Reader, options ...ScannerOption) (*Scanner, error) {
 }
 
 func (s *Scanner) split(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	savedPos := s.nextPosition
 	if len(data) == 0 {
 		return 0, nil, nil
 	}
@@ -136,6 +137,9 @@ func (s *Scanner) split(data []byte, atEOF bool) (advance int, token []byte, err
 	}
 	if f := splitterFuncIndex[data[0]]; f != nil {
 		advance, token, err := f(s, data, atEOF)
+		if advance == 0 {
+			s.nextPosition = savedPos
+		}
 		return advance, token, err
 	}
 	return 0, nil, fmt.Errorf("invalid character: '%c'", data[0])

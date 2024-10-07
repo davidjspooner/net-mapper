@@ -56,7 +56,7 @@ type lookuper struct {
 
 var lookupKey = &struct{}{}
 
-func withContext(ctx context.Context, fn lookupFunc) context.Context {
+func withLookupContext(ctx context.Context, fn lookupFunc) context.Context {
 	l := &lookuper{
 		fn: fn,
 	}
@@ -84,4 +84,37 @@ func Lookup[T any](ctx context.Context, name string) (T, *Module, error) {
 		}
 	}
 	return null, nil, fmt.Errorf("unknown definition %q", name)
+}
+
+type depth struct {
+	count map[Definition]int
+}
+
+func (d *depth) Inc(def Definition) int {
+	if d.count == nil {
+		d.count = make(map[Definition]int)
+	}
+	d.count[def]++
+	return d.count[def]
+}
+
+func (d *depth) Dec(def Definition) int {
+	if d.count == nil {
+		return 0
+	}
+	d.count[def]--
+	return d.count[def]
+}
+
+var key = &depth{}
+
+func withDepthContect(ctx context.Context) context.Context {
+	return context.WithValue(ctx, key, &depth{})
+}
+
+func getDepth(ctx context.Context) *depth {
+	if v := ctx.Value(key); v != nil {
+		return v.(*depth)
+	}
+	return nil
 }

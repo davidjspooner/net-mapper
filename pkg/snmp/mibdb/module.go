@@ -47,7 +47,10 @@ func (module *Module) Exports() (map[string]Definition, error) {
 }
 
 func (module *Module) withContext(ctx context.Context) context.Context {
-	return withContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
+	if module == nil {
+		return ctx
+	}
+	return withLookupContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
 		def, ok := module.definitions[name]
 		if ok {
 			return def, module, nil
@@ -64,6 +67,15 @@ func (module *Module) withContext(ctx context.Context) context.Context {
 			if !ok {
 				return nil, nil, asn1error.NewUnimplementedError("definition %s needs %s which has not been read yet", name, importFrom.moduleName)
 			}
+		}
+		def, ok = otherModule.definitions[name]
+		if ok {
+			return def, otherModule, nil
+		}
+
+		otherModule, ok = module.database.modules[builtInModuleName]
+		if !ok {
+			panic("could not find built-in module")
 		}
 		def, ok = otherModule.definitions[name]
 		if ok {
@@ -168,7 +180,7 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 			}
 
 			if peekStr == "[" || slices.Contains(simpleTypeNames, peekStr) {
-				mibType := &SimpleType{}
+				mibType := &TypeReference{}
 				mibType.set(module, metaTokens, *name.Source())
 				err = mibType.readDefinition(ctx, module, s)
 				if err != nil {

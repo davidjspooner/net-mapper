@@ -35,11 +35,91 @@ func New() *Database {
 	d.modules["<builtin>"] = builtin
 
 	ctx := builtin.withContext(context.Background())
+	ctx = withDepthContect(ctx)
 
 	for _, simpleType := range simpleTypeNames {
-		builtin.definitions[simpleType] = &SimpleType{ident: mibtoken.New(simpleType, builtInPosition)}
+		builtin.definitions[simpleType] = &TypeReference{ident: mibtoken.New(simpleType, builtInPosition)}
 	}
 	builtin.definitions["iso"] = d.MustReadBuiltInValue(ctx, mibtoken.Object_Identifier, "{ 1 }")
+	builtin.definitions["OBJECT-TYPE"] = d.MustReadMacroDefinition(ctx, "OBJECT-TYPE", `
+          BEGIN
+              TYPE NOTATION ::=
+                                        -- must conform to
+                                        -- RFC1155's ObjectSyntax
+                                "SYNTAX" type(ObjectSyntax)
+                                "MAX-ACCESS" Access
+                                "STATUS" Status
+                                DescrPart
+                                ReferPart
+                                IndexPart
+                                DefValPart
+              VALUE NOTATION ::= value (VALUE ObjectName)
+        
+              Access ::= "read-only"
+                              | "read-write"
+                              | "write-only"
+                              | "not-accessible"
+              Status ::= "mandatory"
+                              | "optional"
+                              | "obsolete"
+                              | "deprecated"
+							  | "current"
+        
+              DescrPart ::=
+                         "DESCRIPTION" value (description DisplayString)
+                              | empty
+        
+              ReferPart ::=
+                         "REFERENCE" value (reference DisplayString)
+                              | empty
+        
+              IndexPart ::=
+                         "INDEX" "{" IndexTypes "}"
+                              | empty
+              IndexTypes ::=
+                         IndexType | IndexTypes "," IndexType
+   			  IndexType ::=
+							"IMPLIED" Index
+							| Index
+
+			  Index ::=
+						-- use the SYNTAX value of the
+						-- correspondent OBJECT-TYPE invocation
+						value(ObjectName)        
+              DefValPart ::=
+                         "DEFVAL" "{" value (defvalue ObjectSyntax) "}"
+                              | empty
+          END
+	`)
+
+	builtin.definitions["TRAP-TYPE"] = d.MustReadMacroDefinition(ctx, "TRAP-TYPE", `
+          BEGIN
+              TYPE NOTATION ::= "ENTERPRISE" value
+                                    (enterprise OBJECT IDENTIFIER)
+                                VarPart
+                                DescrPart
+                                ReferPart
+              VALUE NOTATION ::= value (VALUE INTEGER)
+        
+              VarPart ::=
+                         "VARIABLES" "{" VarTypes "}"
+                              | empty
+              VarTypes ::=
+                         VarType | VarTypes "," VarType
+              VarType ::=
+                         value (vartype ObjectName)
+        
+              DescrPart ::=
+                         "DESCRIPTION" value (description DisplayString)
+                              | empty
+        
+              ReferPart ::=
+                         "REFERENCE" value (reference DisplayString)
+                              | empty
+        
+          END
+	`)
+
 	return d
 }
 
@@ -140,6 +220,8 @@ func (d *Database) readDefintions(ctx context.Context) error {
 
 func (d *Database) CreateIndex(ctx context.Context) error {
 
+	ctx = withDepthContect(ctx)
+
 	//read all the mibs ( but dont try and compile them yet)
 	err := d.readDefintions(ctx)
 	if err != nil {
@@ -183,4 +265,20 @@ func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text
 		panic(err)
 	}
 	return value
+}
+
+func (d *Database) MustReadMacroDefinition(ctx context.Context, name, text string) *MacroDefintion {
+	r := strings.NewReader(text)
+	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
+	builtin := d.modules["<builtin>"]
+	if err != nil {
+		panic(err)
+	}
+	mibMacro := &MacroDefintion{name: name}
+	mibMacro.set(builtin, nil, *s.Source())
+	err = mibMacro.readDefinition(ctx, builtin, s)
+	if err != nil {
+		panic(err)
+	}
+	return mibMacro
 }

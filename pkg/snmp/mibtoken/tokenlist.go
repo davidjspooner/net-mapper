@@ -97,14 +97,14 @@ func (tl *List) IsEOF() bool {
 	return tl.Length() == 0
 }
 
-func (tl *List) Clone() *List {
-	clone := &List{
-		source:   *tl.Source(),
-		elements: make([]*Token, len(tl.elements)),
-	}
-	copy(clone.elements, tl.elements)
-	return clone
-}
+//func (tl *List) Clone() *List {
+//	clone := &List{
+//		source:   *tl.Source(),
+//		elements: make([]*Token, len(tl.elements)),
+//	}
+//	copy(clone.elements, tl.elements)
+//	return clone
+//}
 
 func (tl *List) AppendTokens(tokens ...*Token) {
 	tl.elements = append(tl.elements, tokens...)

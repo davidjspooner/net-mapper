@@ -4,30 +4,34 @@ import (
 	"context"
 	"slices"
 
-	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1core"
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
 )
 
+type ValueReader interface {
+	readValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error)
+}
+
 type Type interface {
 	Definition
-	readDefinition(ctx context.Context, s mibtoken.Reader) error
-	readValue(ctx context.Context, s mibtoken.Reader) (Value, error)
+	ValueReader
+	readDefinition(ctx context.Context, module *Module, s mibtoken.Reader) error
 }
 
-type SimpleType struct {
-	source     mibtoken.Source
+type TypeReference struct {
+	valueBase
 	ident      *mibtoken.Token
+	sequenceOf bool
 	constraint *mibtoken.List
-	metaTokens *mibtoken.List
 }
 
-var _ Type = (*SimpleType)(nil)
+var _ Type = (*TypeReference)(nil)
 
 var simpleTypeNames = []string{"INTEGER", "OCTET STRING", "SEQUENCE", "SEQUENCE OF", "CHOICE", "OBJECT IDENTIFIER", "IA5String"}
 
 var brackets = map[string]string{"{": "}", "(": ")", "[": "]"}
 
-func (simpleType *SimpleType) readDefinition(_ context.Context, s mibtoken.Reader) error {
+func (ref *TypeReference) readDefinition(_ context.Context, module *Module, s mibtoken.Reader) error {
 	peek, err := s.LookAhead(0)
 	if err != nil {
 		return err
@@ -54,11 +58,16 @@ func (simpleType *SimpleType) readDefinition(_ context.Context, s mibtoken.Reade
 
 	switch peek.Type() {
 	case mibtoken.IDENT:
-		simpleType.ident = peek
+		ref.ident = peek
+		s.Pop()
+
+		if ref.ident.String() == "SEQUENCE OF" {
+			ref.sequenceOf = true
+			ref.ident, _ = s.Pop()
+		}
 
 		//check later in "compile" if the ident is a known type
 
-		s.Pop()
 		peek, err := s.LookAhead(0)
 		if err != nil {
 			return err
@@ -68,56 +77,137 @@ func (simpleType *SimpleType) readDefinition(_ context.Context, s mibtoken.Reade
 			return nil
 		}
 		opener := peek.String()
-		simpleType.constraint, err = mibtoken.ReadBlock(s, opener, closer)
+		ref.constraint, err = mibtoken.ReadBlock(s, opener, closer)
 		if err != nil {
 			return err
 		}
 		return nil
 	default:
-		return peek.WrapError(asn1core.NewUnexpectedError("IDENT", peek.String(), "token"))
+		return peek.WrapError(asn1error.NewUnexpectedError("IDENT", peek.String(), "token"))
 	}
 }
 
-func (simpleType *SimpleType) Source() mibtoken.Source {
-	return simpleType.source
+func (ref *TypeReference) Source() mibtoken.Source {
+	return ref.source
 }
 
-func (simpleType *SimpleType) compileValue(ctx context.Context, module *Module) error {
-	ok := slices.Contains(simpleTypeNames, simpleType.ident.String())
+func (ref *TypeReference) compileValue(ctx context.Context, module *Module) error {
+	err := ref.valueBase.compileMeta(ctx)
+	if err != nil {
+		return err
+	}
+	ok := slices.Contains(simpleTypeNames, ref.ident.String())
 	if !ok {
-		return simpleType.ident.WrapError(asn1core.NewUnexpectedError("KNOWNTYPE", simpleType.ident.String(), "SimpleType.readDefinition"))
+		return ref.ident.WrapError(asn1error.NewUnexpectedError("KNOWNTYPE", ref.ident.String(), "SimpleType.readDefinition"))
 	}
 	return nil
 }
 
-func (simpleType *SimpleType) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
-	valueType := simpleType.ident.String()
+func (ref *TypeReference) readOneValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error) {
+	valueType := ref.ident.String()
 	switch valueType {
 	case "OBJECT IDENTIFIER":
-		return simpleType.readObjectIdentifierValue(ctx, s)
+		return ref.readObjectIdentifierValue(ctx, s)
 	case "IA5String":
 		tok, err := s.Pop()
 		if err != nil {
 			return nil, err
 		}
 		if tok.Type() != mibtoken.STRING {
-			return nil, tok.WrapError(asn1core.NewUnexpectedError("\"STRING\"", tok.String(), "SimpleType.readValue"))
+			return nil, tok.WrapError(asn1error.NewUnexpectedError("\"STRING\"", tok.String(), "SimpleType.readValue"))
 		}
-		return &goValue[string]{value: tok.String(), source: *tok.Source()}, nil
-	case "type":
-		//TODO read a type defintion....
-		other := &SimpleType{}
-		err := other.readDefinition(ctx, s)
+		value := &goValue[string]{value: tok.String()}
+		value.set(module, ref.metaTokens, *tok.Source())
+		return value, nil
+	case "value":
+		//TODO read an identifier defintion....
+		other := &ConstantValue{}
+		other.set(module, ref.metaTokens, *s.Source())
+		err := other.read(ctx, s)
 		if err != nil {
 			return nil, err
 		}
 		return other, nil
+	case "identifier":
+		//TODO read an identifier defintion....
+		other := &TypeReference{}
+		other.set(module, ref.metaTokens, *s.Source())
+		err := other.readDefinition(ctx, module, s)
+		if err != nil {
+			return nil, err
+		}
+		return other, nil
+	case "type":
+		other := &TypeReference{}
+		other.set(module, ref.metaTokens, *s.Source())
+		err := other.readDefinition(ctx, module, s)
+		if err != nil {
+			return nil, err
+		}
+		return other, nil
+	case "empty":
+		return nil, nil
+	default:
+		def, _, err := Lookup[Type](ctx, valueType)
+		if err != nil {
+			return nil, s.Source().WrapError(err)
+		}
+		value, err := def.readValue(ctx, module, s)
+		if err != nil {
+			return nil, err
+		}
+		return value, nil
 	}
-
-	return nil, asn1core.NewUnimplementedError("simpleType.readValue of type %s", valueType).TODO()
 }
 
-func (simpleType *SimpleType) readObjectIdentifierValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
+func (ref *TypeReference) readValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error) {
+
+	depth := getDepth(ctx)
+	if depth.Inc(ref) > 100 {
+		return nil, ref.source.Errorf("depth limit reached")
+	}
+	defer depth.Dec(ref)
+	if !ref.sequenceOf {
+		value, err := ref.readOneValue(ctx, module, s)
+		if err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
+	values := ValueList{}
+	peek, err := s.LookAhead(0)
+	if err != nil {
+		return nil, err
+	}
+	if peek.String() != "}" {
+	loop:
+		for !s.IsEOF() {
+			value, err := ref.readOneValue(ctx, module, s)
+			if err != nil {
+				return nil, err
+			}
+			if value != nil {
+				values = append(values, value)
+			}
+			peek, err := s.LookAhead(0)
+			if err != nil {
+				return nil, err
+			}
+			switch peek.String() {
+			case ",":
+				s.Pop()
+				continue
+			case "}":
+				break loop
+			default:
+				return nil, peek.WrapError(asn1error.NewUnexpectedError("',' or '}'", peek.String(), "token"))
+			}
+		}
+	}
+	return &values, nil
+}
+
+func (ref *TypeReference) readObjectIdentifierValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
 	oidValue := &OidValue{}
 	err := oidValue.readOid(ctx, s)
 	if err != nil {
@@ -126,203 +216,4 @@ func (simpleType *SimpleType) readObjectIdentifierValue(ctx context.Context, s m
 	return oidValue, nil
 }
 
-type sequenceType struct {
-	source mibtoken.Source
-	tokens mibtoken.List
-}
-
-var _ Type = (*sequenceType)(nil)
-
-func (sequenceType *sequenceType) Source() mibtoken.Source {
-	return sequenceType.source
-}
-
-func (sequenceType *sequenceType) readDefinition(ctx context.Context, s mibtoken.Reader) error {
-	for !s.IsEOF() {
-		peek1, err := s.LookAhead(1)
-		if err == nil && peek1.String() == "::=" {
-			return nil
-		}
-		//read one peek set
-		peek, err := s.LookAhead(0)
-		if err != nil {
-			return err
-		}
-		switch peek.Type() {
-		case mibtoken.IDENT:
-			sequenceType.tokens.AppendTokens(peek)
-			s.Pop()
-			peek, err := s.LookAhead(0)
-			if err == nil {
-				close, ok := brackets[peek.String()]
-				if ok {
-					open := peek.String()
-					constraint, err := mibtoken.ReadBlock(s, open, close)
-					if err != nil {
-						return err
-					}
-					sequenceType.tokens.AppendTokens(peek)
-					sequenceType.tokens.AppendLists(constraint)
-					sequenceType.tokens.AppendTokens(mibtoken.New(close, *peek.Source()))
-				}
-			}
-			//todo the token plus brackets
-		case mibtoken.STRING:
-			sequenceType.tokens.AppendTokens(peek)
-			s.Pop()
-		case mibtoken.SYMBOL:
-			peekTxt := peek.String()
-			switch peekTxt {
-			case "|":
-				return nil
-			default:
-				return peek.WrapError(asn1core.NewUnexpectedError("IDENT", peek.String(), "token in sequenceType.read"))
-			}
-		}
-	}
-	return nil
-}
-
-func (sequenceType *sequenceType) isDefined() bool {
-	return sequenceType.tokens.Length() > 0
-}
-
-func (sequenceType *sequenceType) String() string {
-	return sequenceType.tokens.String()
-}
-
-func (sequenceType *sequenceType) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
-
-	overall := &structureValue{}
-
-	err := sequenceType.tokens.ForEach(func(definition *mibtoken.Token) error {
-		switch definition.Type() {
-		case mibtoken.IDENT:
-			defStr := definition.String()
-			if defStr == "empty" {
-				return nil
-			}
-			typeReader, _, err := Lookup[Type](ctx, defStr)
-			if err != nil {
-				return mibtoken.WrapError(s, err)
-			}
-			value, err := typeReader.readValue(ctx, s)
-			if err != nil {
-				return mibtoken.WrapError(s, err)
-			}
-			_ = value
-		case mibtoken.STRING:
-			expected, err := mibtoken.Unquote(definition)
-			if err != nil {
-				return mibtoken.WrapError(s, err)
-			}
-			err = mibtoken.ReadExpected(s, expected)
-			if err != nil {
-				return mibtoken.WrapError(s, err)
-			}
-		default:
-			return mibtoken.WrapError(s, asn1core.NewUnexpectedError("IDENT", definition.String(), "token in sequenceType.readValue"))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return overall, nil
-}
-
-type choiceType struct {
-	source       mibtoken.Source
-	alternatives []Type
-}
-
-var _ Type = (*choiceType)(nil)
-
-func (choiceType *choiceType) readDefinition(ctx context.Context, s mibtoken.Reader) error {
-	for !s.IsEOF() {
-		if len(choiceType.alternatives) > 0 {
-			peek, _ := s.LookAhead(0)
-			if peek.String() != "|" {
-				break
-			}
-			s.Pop()
-		}
-		peek, err := s.LookAhead(0)
-		if err != nil {
-			return err
-		}
-		switch peek.String() {
-		case "value":
-			mibtoken.ReadExpected(s, "value")
-			block, err := mibtoken.ReadBlock(s, "(", ")")
-			if err != nil {
-				return err
-			}
-			label, err := block.Pop()
-			if err != nil {
-				return err
-			}
-			typeName, err := block.Pop()
-			if err != nil {
-				typeName = label
-			}
-			simpleType := &SimpleType{ident: typeName, source: *typeName.Source()}
-			choiceType.alternatives = append(choiceType.alternatives, simpleType)
-		case "type":
-			mibtoken.ReadExpected(s, "type")
-			block, err := mibtoken.ReadBlock(s, "(", ")")
-			if err != nil {
-				simpleType := &SimpleType{ident: peek, source: *peek.Source()}
-				choiceType.alternatives = append(choiceType.alternatives, simpleType)
-				continue
-			}
-			typeName, err := block.Pop()
-			if err != nil {
-				return err
-			}
-			typeDef, _, err := Lookup[Type](ctx, typeName.String())
-			if err != nil {
-				return err
-			}
-			choiceType.alternatives = append(choiceType.alternatives, typeDef)
-		default:
-			alternative := &sequenceType{}
-			err := alternative.readDefinition(ctx, s)
-			if err != nil {
-				return err
-			}
-			if !alternative.isDefined() {
-				break
-			}
-			choiceType.alternatives = append(choiceType.alternatives, alternative)
-		}
-	}
-	return nil
-}
-
-func (choiceType *choiceType) Source() mibtoken.Source {
-	return choiceType.source
-}
-
-func (choiceType *choiceType) readValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
-
-	errs := asn1core.ErrorList{}
-	for _, alt := range choiceType.alternatives {
-		tmp := mibtoken.NewProjection(s)
-		value, err := alt.readValue(ctx, tmp)
-		if err == nil {
-			tmp.Commit()
-			return value, nil
-		}
-		errs = append(errs, err)
-	}
-	switch len(errs) {
-	case 1:
-		return nil, errs[0]
-	case 0:
-		return nil, s.Source().Errorf("no choice matched")
-	default:
-		return nil, errs
-	}
-}
+// ------------------------------------

@@ -34,7 +34,8 @@ func (mibMacro *MacroDefintion) readDefinition(ctx context.Context, module *Modu
 		if err != nil {
 			return err
 		}
-		choices := &choiceType{source: *block.Source()}
+		choices := &patternChoice{}
+		choices.set(module, block, *token.Source())
 		err = choices.readDefinition(ctx, module, block)
 		fieldName := token.String()
 
@@ -47,9 +48,42 @@ func (mibMacro *MacroDefintion) readDefinition(ctx context.Context, module *Modu
 		if _, ok := mibMacro.fields[fieldName]; ok {
 			return token.WrapError(asn1error.NewUnexpectedError("DUPLICATE", fieldName, "macro field"))
 		}
-		if len(choices.alternatives) == 1 {
+		switch len(choices.alternatives) {
+		case 0:
+			return token.WrapError(asn1error.NewUnexpectedError("EMPTY", fieldName, "macro field"))
+		case 1:
 			mibMacro.fields[fieldName] = choices.alternatives[0]
-		} else {
+		case 2:
+			secondChoice := choices.alternatives[1]
+			if seq, ok := secondChoice.(*patternSequence); ok {
+				if len(seq.pattern) == 3 {
+					firstInSeq, okFirst := seq.pattern[0].(*TypeReference)
+					secondInSeq, okSecond := seq.pattern[1].(*ExpectedToken)
+					thirdInSeq, okThird := seq.pattern[2].(*TypeReference)
+					_ = secondInSeq
+					if okFirst && okSecond && okThird {
+						if firstInSeq.ident.String() == fieldName {
+							seqOf := &TypeReference{
+								ident:      thirdInSeq.ident,
+								valueBase:  choices.valueBase,
+								sequenceOf: true,
+							}
+							mibMacro.fields[fieldName] = seqOf
+							continue
+						} else if thirdInSeq.ident.String() == fieldName {
+							seqOf := &TypeReference{
+								ident:      firstInSeq.ident,
+								valueBase:  choices.valueBase,
+								sequenceOf: true,
+							}
+							mibMacro.fields[fieldName] = seqOf
+							continue
+						}
+					}
+				}
+			}
+			mibMacro.fields[fieldName] = choices
+		default:
 			mibMacro.fields[fieldName] = choices
 		}
 	}
@@ -71,7 +105,7 @@ func (mibMacro *MacroDefintion) String() string {
 
 func (mibMacro *MacroDefintion) readValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error) {
 
-	ctx = withContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
+	ctx = withLookupContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
 		return mibMacro.fields[name], nil, nil
 	})
 
