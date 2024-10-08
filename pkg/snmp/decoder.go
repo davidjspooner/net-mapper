@@ -67,10 +67,8 @@ func (printer *MetricPrinter) Handle(ctx context.Context, vb *VarBind) error {
 
 	name := branch.Name()
 	if len(tail) > 0 {
-		if len(tail) != 1 || tail[0] != 0 {
-			for _, i := range tail {
-				name += fmt.Sprintf("_%d", i)
-			}
+		for _, i := range tail {
+			name += fmt.Sprintf("_%d", i)
 		}
 	}
 
@@ -142,14 +140,12 @@ func (printer *MetricPrinter) MetaDataForBranch(branch *mibdb.OidBranch) *Metric
 		if syntax != nil {
 			switch syntax := syntax.(type) {
 			case *mibdb.TypeReference:
-				syntaxType := syntax.Lookup()
-				switch syntaxType := syntaxType.(type) {
-				case *mibdb.CompositeValue:
-					meta.DisplayHint, _ = syntaxType.Get("DISPLAY-HINT").(string)
-				default:
-					//pass
-				}
+				//TODO better lookup of type and thus inferring of DisplayHint
 				switch syntax.Name() {
+				case "OBJECT IDENTIFIER":
+					meta.DisplayHint = "a"
+				case "DisplayString":
+					meta.DisplayHint = "a"
 				case "IpAddress", "NetworkAddress":
 					meta.DisplayHint = "a"
 				case "PhysAddress":
