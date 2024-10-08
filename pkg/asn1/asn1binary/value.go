@@ -142,7 +142,9 @@ func (v *Value) UnpackAsn1(envelope Envelope, bytes []byte) error {
 	v.Bytes = bytes
 	return nil
 }
-
+func (value *Value) UnpackIntoGo(i any) error {
+	return value.UnpackIntoGoWithParameters(i, nil)
+}
 func (value *Value) UnpackIntoGoWithParameters(i any, params *Parameters) error {
 	err := params.Validate(&value.Envelope)
 	if err != nil {

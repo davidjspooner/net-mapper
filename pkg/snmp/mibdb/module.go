@@ -87,15 +87,16 @@ func (module *Module) withContext(ctx context.Context) context.Context {
 
 func (module *Module) compileValues(ctx context.Context) error {
 	ctx = module.withContext(ctx)
-	for _, def := range module.definitions {
-		value, ok := def.(Value)
+	for key, def := range module.definitions {
+		compilable, ok := def.(CompilableValue)
 		if !ok {
 			continue
 		}
-		err := value.compileValue(ctx, module)
+		value,err := compilable.compileValue(ctx, module)
 		if err != nil {
 			return err
 		}
+		module.definitions[key] = value
 	}
 	return nil
 }

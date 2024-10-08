@@ -2,6 +2,7 @@ package mibdb
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path"
 	"slices"
@@ -16,13 +17,18 @@ type Database struct {
 	modules   map[string]*Module
 	filenames []string
 	root      OidBranch
+	logger    *slog.Logger
 }
 
 const builtInModuleName = "<builtin>"
 
-func New() *Database {
+func New(logger *slog.Logger) *Database {
+
+	logger = logger.WithGroup("mibdb")
+
 	d := &Database{
 		modules: make(map[string]*Module),
+		logger:  logger,
 	}
 
 	builtin := &Module{
@@ -120,6 +126,8 @@ func New() *Database {
           END
 	`)
 
+	d.logger.Debug("Built-in MIB loaded")
+
 	return d
 }
 
@@ -130,6 +138,10 @@ func (d *Database) AddFile(filenames ...string) error {
 		}
 	}
 	return nil
+}
+
+func (d *Database) Logger() *slog.Logger {
+	return d.logger
 }
 
 func (d *Database) AddDirectory(dir string) error {
@@ -163,26 +175,33 @@ func (d *Database) compileValues(ctx context.Context) error {
 		compile = append(compile, module)
 	}
 
-	progress := true
-	for progress {
+	successCount := 1
+	passCount := 0
+	for successCount > 0 {
 		failedCompile = nil
 		errList = nil
 		if len(compile) == 0 {
 			break
 		}
-		progress = false
+		successCount = 0
+		passCount++
 		for _, module := range compile {
+			//started := time.Now()
 			err := module.compileValues(ctx)
+			//elapsed := time.Since(started)
+			//d.logger.DebugContext(ctx, "Compile module", slog.String("module", module.Name()), slog.Any("elapsed", fmt.Sprintf("%0.3f", elapsed.Seconds())), slog.Any("error", err))
 			if err != nil {
 				failedCompile = append(failedCompile, module)
 				errList = append(errList, err)
 			} else {
-				progress = true
+				successCount++
 			}
 		}
 		compile = failedCompile
+		d.logger.DebugContext(ctx, "Compiled values", slog.Any("pass", passCount), slog.Any("success", successCount), slog.Any("deferred", len(failedCompile)))
 	}
 	if len(errList) > 0 {
+		d.logger.DebugContext(ctx, "Failed to compile values", slog.Int("failed", len(errList)))
 		return errList
 	}
 	return nil
@@ -224,9 +243,11 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 
 	//read all the mibs ( but dont try and compile them yet)
 	err := d.readDefintions(ctx)
+	d.logger.DebugContext(ctx, "Finished reading definitions", slog.Any("error", err))
 	if err != nil {
 		return err
 	}
+
 	err = d.compileValues(ctx)
 	if err != nil {
 		return err
@@ -242,6 +263,7 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 			//TODO handle tables
 		}
 	}
+	d.logger.DebugContext(ctx, "Finished creating index")
 	return nil
 }
 

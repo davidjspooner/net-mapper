@@ -57,7 +57,11 @@ func (base *valueBase) compileMeta(ctx context.Context) error {
 
 type Value interface {
 	Definition
-	compileValue(ctx context.Context, module *Module) error
+}
+
+type CompilableValue interface {
+	Value
+	compileValue(ctx context.Context, module *Module) (Value, error)
 }
 
 // ------------------------------------
@@ -68,7 +72,7 @@ type OidValue struct {
 	compiled asn1go.OID
 }
 
-var _ Definition = (*OidValue)(nil)
+var _ CompilableValue = (*OidValue)(nil)
 
 func (value *OidValue) readOid(_ context.Context, s mibtoken.Reader) error {
 	value.source = *s.Source()
@@ -111,13 +115,13 @@ func (value *OidValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *OidValue) compileValue(ctx context.Context, module *Module) error {
+func (value *OidValue) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(value.compiled) > 0 {
-		return nil
+		return value, nil
 	}
 	for _, element := range value.elements {
 
@@ -133,20 +137,21 @@ func (value *OidValue) compileValue(ctx context.Context, module *Module) error {
 		default:
 			otherDefintion, otherModule, err := Lookup[Definition](ctx, element)
 			if err != nil {
-				return value.source.WrapError(err)
+				return nil, value.source.WrapError(err)
 			}
 			otherOID, ok := otherDefintion.(*OidValue)
 			if !ok {
-				return value.source.Errorf("expected OID but got %T", otherDefintion)
+				return nil, value.source.Errorf("expected OID but got %T", otherDefintion)
 			}
-			err = otherOID.compileValue(ctx, otherModule)
+			ov, err := otherOID.compileValue(ctx, otherModule)
 			if err != nil {
-				return value.source.WrapError(err)
+				return nil, value.source.WrapError(err)
 			}
+			otherOID = ov.(*OidValue)
 			value.compiled = append(value.compiled, otherOID.compiled...)
 		}
 	}
-	return nil
+	return value, nil
 }
 
 func (value *OidValue) String() string {
@@ -163,7 +168,7 @@ type ConstantValue struct {
 	elements []string
 }
 
-var _ Value = (*ConstantValue)(nil)
+var _ CompilableValue = (*ConstantValue)(nil)
 
 func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 	value.source = *s.Source()
@@ -190,12 +195,12 @@ func (value *ConstantValue) read(_ context.Context, s mibtoken.Reader) error {
 	return nil
 }
 
-func (value *ConstantValue) compileValue(ctx context.Context, module *Module) error {
+func (value *ConstantValue) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return value, nil
 }
 
 func (value *ConstantValue) Source() mibtoken.Source {
@@ -233,16 +238,18 @@ type CompositeValue struct {
 	fields map[string]Value
 }
 
+var _ CompilableValue = (*CompositeValue)(nil)
+
 func (value *CompositeValue) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *CompositeValue) compileValue(ctx context.Context, module *Module) error {
+func (value *CompositeValue) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return value, nil
 }
 
 // ------------------------------------
@@ -252,23 +259,25 @@ type goValue[T any] struct {
 	value T
 }
 
-var _ Value = (*goValue[string])(nil)
+var _ CompilableValue = (*goValue[string])(nil)
 
 func (value *goValue[T]) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *goValue[T]) compileValue(ctx context.Context, module *Module) error {
+func (value *goValue[T]) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return value, nil
 }
 
 //--------------------------------------
 
 type ValueList []Value
+
+var _ CompilableValue = (ValueList)(nil)
 
 func (list ValueList) Source() mibtoken.Source {
 	if len(list) == 0 {
@@ -277,12 +286,16 @@ func (list ValueList) Source() mibtoken.Source {
 	return list[0].Source()
 }
 
-func (list ValueList) compileValue(ctx context.Context, module *Module) error {
-	for _, value := range list {
-		err := value.compileValue(ctx, module)
-		if err != nil {
-			return err
+func (list ValueList) compileValue(ctx context.Context, module *Module) (Value, error) {
+	for i, value := range list {
+		compilable, ok := value.(CompilableValue)
+		if ok {
+			value, err := compilable.compileValue(ctx, module)
+			if err != nil {
+				return nil, err
+			}
+			list[i] = value
 		}
 	}
-	return nil
+	return list, nil
 }

@@ -16,7 +16,7 @@ func (v *Integer) PackAsn1(params *asn1binary.Parameters) (asn1binary.Envelope, 
 	return asn1binary.Envelope{Tag: asn1binary.TagInteger}, *v, nil
 }
 func (v *Integer) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
-	if envelope.Tag != asn1binary.TagInteger {
+	if envelope.Class == asn1binary.ClassUniversal && envelope.Tag != asn1binary.TagInteger {
 		return asn1error.NewUnexpectedError(asn1binary.TagInteger, envelope.Tag, "unexpected tag")
 	}
 	*v = make([]byte, len(bytes))

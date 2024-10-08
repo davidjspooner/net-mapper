@@ -4,16 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
+	"github.com/davidjspooner/net-mapper/pkg/logevent"
 	"github.com/davidjspooner/net-mapper/pkg/snmp"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibdb"
 )
 
-func ReadAllMibs(ctx context.Context, dirname string) (*mibdb.Database, error) {
+func ReadAllMibs(ctx context.Context, dirname string, logger *slog.Logger) (*mibdb.Database, error) {
 
-	db := mibdb.New()
+	db := mibdb.New(logger)
 
 	err := db.AddDirectory(dirname)
 	if err != nil {
@@ -26,7 +28,7 @@ func ReadAllMibs(ctx context.Context, dirname string) (*mibdb.Database, error) {
 	return db, nil
 }
 
-func DecodeDump(filename string, db *mibdb.Database) error {
+func DecodeDump(ctx context.Context, filename string, db *mibdb.Database) error {
 	community := "public"
 	//oid := asn1.ObjectIdentifier{1, 3, 6, 1, 2, 1, 1, 1, 0} // Replace with your OID
 
@@ -45,7 +47,7 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 		if frame.IPProtocol != 17 { //udp
 			return nil
 		}
-		fmt.Printf("Frame: %d Src: %s:%d, Dst: %s:%d\n", frame.FrameNumber, frame.SrcAddr.IP, frame.SrcPort, frame.DstAddr.IP, frame.DstPort)
+		//fmt.Printf("Frame: %d Src: %s:%d, Dst: %s:%d\n", frame.FrameNumber, frame.SrcAddr.IP, frame.SrcPort, frame.DstAddr.IP, frame.DstPort)
 		// dump := hex.Dump(frame.Data)
 		// for _, line := range strings.Split(dump, "\n") {
 		// 	fmt.Printf("      %s\n", line)
@@ -82,7 +84,7 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 		// 	fmt.Printf("      ErrorIndex: %d\n", message.PDU.ErrorIndex)
 		// }
 		for _, vb := range message.PDU.VarBinds {
-			err := metricDecoder.Handle(&vb)
+			err := metricDecoder.Handle(ctx, &vb)
 			if err != nil {
 				return err
 			}
@@ -90,7 +92,7 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 		return err
 	}))
 	if err == nil {
-		err = metricDecoder.Flush()
+		err = metricDecoder.Flush(ctx)
 	}
 	return err
 }
@@ -98,7 +100,14 @@ func DecodeDump(filename string, db *mibdb.Database) error {
 func main() {
 	ctx := context.Background()
 
-	db, err := ReadAllMibs(ctx, "/mnt/homelab-atom/static/mib/")
+	logOptions := slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}
+	handler := logevent.NewHandler(&logOptions)
+	logger := slog.New(handler)
+	ctx = logevent.WithLogger(ctx, logger)
+
+	db, err := ReadAllMibs(ctx, "/mnt/homelab-atom/static/mib/", logger)
 
 	if err != nil {
 		list, multiError := err.(asn1error.List)
@@ -116,5 +125,5 @@ func main() {
 		return
 	}
 
-	DecodeDump("/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
+	DecodeDump(ctx, "/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
 }

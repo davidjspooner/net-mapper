@@ -91,16 +91,16 @@ func (ref *TypeReference) Source() mibtoken.Source {
 	return ref.source
 }
 
-func (ref *TypeReference) compileValue(ctx context.Context, module *Module) error {
+func (ref *TypeReference) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := ref.valueBase.compileMeta(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ok := slices.Contains(simpleTypeNames, ref.ident.String())
 	if !ok {
-		return ref.ident.WrapError(asn1error.NewUnexpectedError("KNOWNTYPE", ref.ident.String(), "SimpleType.readDefinition"))
+		return nil, ref.ident.WrapError(asn1error.NewUnexpectedError("KNOWNTYPE", ref.ident.String(), "SimpleType.readDefinition"))
 	}
-	return nil
+	return ref, nil
 }
 
 func (ref *TypeReference) readOneValue(ctx context.Context, module *Module, s mibtoken.Reader) (Value, error) {
