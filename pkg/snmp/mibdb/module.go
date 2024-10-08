@@ -46,42 +46,46 @@ func (module *Module) Exports() (map[string]Definition, error) {
 	return exports, nil
 }
 
+func (module *Module) Lookup(name string) (Definition, *Module, error) {
+	def, ok := module.definitions[name]
+	if ok {
+		return def, module, nil
+	}
+	importFrom := module.imports[name]
+	var otherModule *Module
+	if importFrom.moduleName == "" {
+		otherModule, ok = module.database.modules[builtInModuleName]
+		if !ok {
+			panic("could not find built-in module")
+		}
+	} else {
+		otherModule, ok = module.database.modules[importFrom.moduleName]
+		if !ok {
+			return nil, nil, asn1error.NewUnimplementedError("definition %s needs %s which has not been read yet", name, importFrom.moduleName)
+		}
+	}
+	def, ok = otherModule.definitions[name]
+	if ok {
+		return def, otherModule, nil
+	}
+
+	otherModule, ok = module.database.modules[builtInModuleName]
+	if !ok {
+		panic("could not find built-in module")
+	}
+	def, ok = otherModule.definitions[name]
+	if ok {
+		return def, otherModule, nil
+	}
+	return nil, nil, asn1error.NewUnimplementedError("definition %s not found in %s", name, otherModule.name)
+}
+
 func (module *Module) withContext(ctx context.Context) context.Context {
 	if module == nil {
 		return ctx
 	}
 	return withLookupContext(ctx, func(ctx context.Context, name string) (Definition, *Module, error) {
-		def, ok := module.definitions[name]
-		if ok {
-			return def, module, nil
-		}
-		importFrom := module.imports[name]
-		var otherModule *Module
-		if importFrom.moduleName == "" {
-			otherModule, ok = module.database.modules[builtInModuleName]
-			if !ok {
-				panic("could not find built-in module")
-			}
-		} else {
-			otherModule, ok = module.database.modules[importFrom.moduleName]
-			if !ok {
-				return nil, nil, asn1error.NewUnimplementedError("definition %s needs %s which has not been read yet", name, importFrom.moduleName)
-			}
-		}
-		def, ok = otherModule.definitions[name]
-		if ok {
-			return def, otherModule, nil
-		}
-
-		otherModule, ok = module.database.modules[builtInModuleName]
-		if !ok {
-			panic("could not find built-in module")
-		}
-		def, ok = otherModule.definitions[name]
-		if ok {
-			return def, otherModule, nil
-		}
-		return nil, nil, asn1error.NewUnimplementedError("definition %s not found in %s", name, otherModule.name)
+		return module.Lookup(name)
 	})
 }
 
@@ -92,7 +96,7 @@ func (module *Module) compileValues(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		value,err := compilable.compileValue(ctx, module)
+		value, err := compilable.compileValue(ctx, module)
 		if err != nil {
 			return err
 		}

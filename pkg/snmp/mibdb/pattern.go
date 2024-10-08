@@ -92,47 +92,47 @@ func (patternSequence *patternSequence) readValue(ctx context.Context, module *M
 	}
 	defer depth.Dec(patternSequence)
 
-	values := []Value{}
-	names := []string{}
+	lastName := ""
 
 	tmp := mibtoken.NewProjection(s)
+	composite := CompositeValue{
+		fields: make(map[string]Value),
+		vType:  patternSequence,
+	}
 
-	for _, pattern := range patternSequence.pattern {
+	for i, pattern := range patternSequence.pattern {
 
 		value, err := pattern.readValue(ctx, module, tmp)
 		if err != nil {
 			return nil, err
 		}
 		if value != nil {
-			values = append(values, value)
+			otherComposite, _ := value.(*CompositeValue)
+			if otherComposite != nil {
+				for k, v := range otherComposite.fields {
+					composite.fields[k] = v
+				}
+			} else if lastName != "" {
+				composite.fields[lastName] = value
+			} else {
+				composite.fields[fmt.Sprintf("%d", i)] = value
+			}
 		} else {
 			expected, ok := pattern.(*ExpectedToken)
 			if ok {
-				names = append(names, expected.text)
+				c := expected.text[0]
+				if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+					lastName = expected.text
+				}
 			}
 		}
 	}
 	tmp.Commit()
-	switch len(values) {
-	case 0:
-		return nil, nil
-	case 1:
-		return values[0], nil
-	default:
-		composite := CompositeValue{
-			fields: make(map[string]Value),
-			vType:  patternSequence,
-		}
-		composite.set(module, nil, *s.Source())
-		for i, value := range values {
-			if i >= len(names) {
-				composite.fields[fmt.Sprintf("%d", i)] = value
-				continue
-			}
-			composite.fields[names[i]] = value
-		}
-		return &composite, nil
+	if len(composite.fields) == 0 && lastName != "" {
+		v := &GoValue[string]{valueBase: patternSequence.valueBase, value: lastName}
+		return v, nil
 	}
+	return &composite, nil
 }
 
 type patternChoice struct {

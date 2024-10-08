@@ -71,9 +71,9 @@ func (v *OID) UnpackAsn1(envelope asn1binary.Envelope, bytes []byte) error {
 	}
 	return nil
 }
-func (o *OID) String() string {
+func (o OID) String() string {
 	sb := strings.Builder{}
-	for i, v := range *o {
+	for i, v := range o {
 		if i != 0 {
 			sb.WriteString(".")
 		}

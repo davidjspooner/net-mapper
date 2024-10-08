@@ -10,9 +10,9 @@ import (
 )
 
 type valueBase struct {
+	Stash
 	module     *Module
 	metaTokens *mibtoken.List
-	metaValue  Value
 	source     mibtoken.Source
 }
 
@@ -23,7 +23,7 @@ func (base *valueBase) set(module *Module, metaTokens *mibtoken.List, source mib
 }
 
 func (base *valueBase) compileMeta(ctx context.Context) error {
-	if base.metaTokens == nil || base.metaTokens.Length() == 0 || base.metaValue != nil {
+	if base.metaTokens == nil || base.metaTokens.Length() == 0 || base.Stash != nil {
 		return nil
 	}
 
@@ -48,7 +48,25 @@ func (base *valueBase) compileMeta(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		base.metaValue = value
+		switch value := value.(type) {
+		case *CompositeValue:
+			for name, field := range value.fields {
+				switch field := field.(type) {
+				case *ConstantValue:
+					base.Set(name, field.elements)
+				case *OidValue:
+					base.Set(name, field.compiled)
+				case *GoValue[string]:
+					base.Set(name, field.value)
+				case *TypeReference:
+					base.Set(name, field)
+				default:
+					base.Set(name, field)
+				}
+			}
+		default:
+			base.Set("VALUE", value)
+		}
 	}
 	return nil
 }
@@ -57,6 +75,8 @@ func (base *valueBase) compileMeta(ctx context.Context) error {
 
 type Value interface {
 	Definition
+	Get(name string) any
+	Set(name string, value any)
 }
 
 type CompilableValue interface {
@@ -120,6 +140,7 @@ func (value *OidValue) compileValue(ctx context.Context, module *Module) (Value,
 	if err != nil {
 		return nil, err
 	}
+
 	if len(value.compiled) > 0 {
 		return value, nil
 	}
@@ -154,11 +175,8 @@ func (value *OidValue) compileValue(ctx context.Context, module *Module) (Value,
 	return value, nil
 }
 
-func (value *OidValue) String() string {
-	if len(value.compiled) == 0 {
-		return "<uncompiled>"
-	}
-	return value.compiled.String()
+func (value *OidValue) OID() asn1go.OID {
+	return value.compiled
 }
 
 // ------------------------------------
@@ -252,25 +270,42 @@ func (value *CompositeValue) compileValue(ctx context.Context, module *Module) (
 	return value, nil
 }
 
+func (value *CompositeValue) Get(name string) any {
+	elem := value.fields[name]
+	if elem == nil {
+		return value.valueBase.Get(name)
+	}
+	switch elem := elem.(type) {
+	case *GoValue[string]:
+		return elem.value
+	default:
+		return elem
+	}
+}
+
 // ------------------------------------
 
-type goValue[T any] struct {
+type GoValue[T any] struct {
 	valueBase
 	value T
 }
 
-var _ CompilableValue = (*goValue[string])(nil)
+var _ CompilableValue = (*GoValue[string])(nil)
 
-func (value *goValue[T]) Source() mibtoken.Source {
+func (value *GoValue[T]) Source() mibtoken.Source {
 	return value.source
 }
 
-func (value *goValue[T]) compileValue(ctx context.Context, module *Module) (Value, error) {
+func (value *GoValue[T]) compileValue(ctx context.Context, module *Module) (Value, error) {
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return value, nil
+}
+
+func (value *GoValue[T]) Value() T {
+	return value.value
 }
 
 //--------------------------------------
@@ -298,4 +333,10 @@ func (list ValueList) compileValue(ctx context.Context, module *Module) (Value, 
 		}
 	}
 	return list, nil
+}
+
+func (list ValueList) Get(name string) any {
+	return nil
+}
+func (list ValueList) Set(name string, v any) {
 }

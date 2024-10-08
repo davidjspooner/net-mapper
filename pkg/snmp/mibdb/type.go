@@ -31,6 +31,19 @@ var simpleTypeNames = []string{"INTEGER", "OCTET STRING", "SEQUENCE", "SEQUENCE 
 
 var brackets = map[string]string{"{": "}", "(": ")", "[": "]"}
 
+func (ref *TypeReference) Name() string {
+	return ref.ident.String()
+}
+
+func (ref *TypeReference) Lookup() Definition {
+	def, otherModule, err := ref.module.Lookup(ref.ident.String())
+	_, _ = otherModule, err
+	if err != nil {
+		return nil
+	}
+	return def
+}
+
 func (ref *TypeReference) readDefinition(_ context.Context, module *Module, s mibtoken.Reader) error {
 	peek, err := s.LookAhead(0)
 	if err != nil {
@@ -116,7 +129,8 @@ func (ref *TypeReference) readOneValue(ctx context.Context, module *Module, s mi
 		if tok.Type() != mibtoken.STRING {
 			return nil, tok.WrapError(asn1error.NewUnexpectedError("\"STRING\"", tok.String(), "SimpleType.readValue"))
 		}
-		value := &goValue[string]{value: tok.String()}
+		s, _ := mibtoken.Unquote(tok)
+		value := &GoValue[string]{value: s}
 		value.set(module, ref.metaTokens, *tok.Source())
 		return value, nil
 	case "value":

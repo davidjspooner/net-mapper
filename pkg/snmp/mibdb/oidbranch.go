@@ -7,14 +7,20 @@ import (
 type DefinitionIndex map[string]Definition
 
 type OidBranch struct {
+	Stash
 	parent   *OidBranch
 	name     string
+	oid      asn1go.OID
 	def      Definition
 	children map[int]*OidBranch
 }
 
 func (branch *OidBranch) Name() string {
 	return branch.name
+}
+
+func (branch *OidBranch) OID() asn1go.OID {
+	return branch.oid
 }
 
 func (branch *OidBranch) Definition() Definition {
@@ -52,6 +58,8 @@ func (branch *OidBranch) addDefinition(oid asn1go.OID, name string, def Definiti
 		child = &OidBranch{
 			parent: branch,
 		}
+		child.oid = append(branch.oid, branch.oid...)
+		child.oid = append(branch.oid, oid[0])
 		if branch.children == nil {
 			branch.children = make(map[int]*OidBranch)
 		}
