@@ -83,6 +83,9 @@ func DecodeDump(ctx context.Context, filename string, db *mibdb.Database) error 
 		// if message.PDU.ErrorIndex > 0 {
 		// 	fmt.Printf("      ErrorIndex: %d\n", message.PDU.ErrorIndex)
 		// }
+		if message.PDU.Tag != snmp.RESPONSE {
+			return nil
+		}
 		for _, vb := range message.PDU.VarBinds {
 			err := metricDecoder.Handle(ctx, &vb)
 			if err != nil {
