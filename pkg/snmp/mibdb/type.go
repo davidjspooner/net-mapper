@@ -3,6 +3,7 @@ package mibdb
 import (
 	"context"
 	"slices"
+	"strconv"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
@@ -228,6 +229,41 @@ func (ref *TypeReference) readObjectIdentifierValue(ctx context.Context, s mibto
 		return nil, err
 	}
 	return oidValue, nil
+}
+
+func (ref *TypeReference) CompileEnums() map[int]string {
+	if ref.constraint == nil {
+		return nil
+	}
+	copy := mibtoken.NewProjection(ref.constraint)
+	mapping := make(map[int]string)
+	for !copy.IsEOF() {
+		name, err := copy.Pop()
+		if err != nil {
+			return nil
+		}
+		if name.Type() != mibtoken.IDENT {
+			return nil
+		}
+		block, err := mibtoken.ReadBlock(copy, "(", ")")
+		if err != nil || block.Length() != 1 {
+			return nil
+		}
+		v, err := block.LookAhead(0)
+		if err != nil || v.Type() != mibtoken.NUMBER {
+			return nil
+		}
+		n, err := strconv.Atoi(v.String())
+		if err != nil {
+			return nil
+		}
+		mapping[n] = name.String()
+		peek, err := copy.LookAhead(0)
+		if err == nil && peek.String() == "," {
+			copy.Pop()
+		}
+	}
+	return mapping
 }
 
 // ------------------------------------

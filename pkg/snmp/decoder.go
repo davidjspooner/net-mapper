@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 
+	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibdb"
 )
 
@@ -28,15 +30,22 @@ func (f VarBindHandlerFunc) Flush(ctx context.Context) error {
 
 //-------------------------------------
 
+type TableStructure struct {
+	Columns []string
+}
+
 type MetricMeta struct {
+	Name             string
 	Help, Type, Unit string
 	DisplayHint      string
+	Enums            map[int]string
+	Table            *TableStructure
 }
 
 type MetricPrinter struct {
-	w        io.Writer
-	db       *mibdb.Database
-	lastMeta *MetricMeta
+	w               io.Writer
+	db              *mibdb.Database
+	lastPrintedMeta *MetricMeta
 }
 
 var _ VarBindHandler = &MetricPrinter{}
@@ -57,35 +66,41 @@ func (printer *MetricPrinter) Handle(ctx context.Context, vb *VarBind) error {
 	}
 
 	branch, tail := printer.db.FindOID(vb.OID)
-	if branch == nil || branch.Definition() == nil {
+	if branch == nil || branch.Value() == nil {
 		printer.db.Logger().WarnContext(ctx, "OID not found", slog.String("OID", vb.OID.String()))
 		return nil
 	}
-	parent := branch.Parent()
-	parentDef := parent.Definition()
-	_ = parentDef
-
-	name := branch.Name()
-	if len(tail) > 0 {
-		for _, i := range tail {
-			name += fmt.Sprintf("_%d", i)
-		}
-	}
 
 	meta := printer.MetaDataForBranch(branch)
-	if printer.lastMeta != meta {
-		printer.lastMeta = meta
-		if meta.Help != "" {
-			fmt.Fprintf(printer.w, "# HELP %s %s\n", name, meta.Help)
-		}
-		if meta.Type != "" {
-			fmt.Fprintf(printer.w, "# TYPE %s %s\n", name, meta.Type)
-		}
-		if meta.Unit != "" {
-			fmt.Fprintf(printer.w, "# UNIT %s %s\n", name, meta.Unit)
-		}
+	metaParent := printer.MetaDataForBranch(branch.Parent())
+	_ = metaParent
+
+	if metaParent.Table == nil && len(tail) > 1 {
+		var oid asn1go.OID
+		oid = append(oid, branch.Value().OID()...)
+		oid = append(oid, tail[0])
+		printer.db.Logger().WarnContext(ctx, "Oid not known", slog.String("OID", oid.String()+".*"))
+		return nil
 	}
 
+	printer.printLine(ctx, meta, tail, s)
+	return nil
+}
+
+func (printer *MetricPrinter) printLine(_ context.Context, meta *MetricMeta, _ asn1go.OID, s string) error {
+	if printer.lastPrintedMeta != meta {
+		printer.lastPrintedMeta = meta
+		if meta.Help != "" {
+			fmt.Fprintf(printer.w, "# HELP %s %s\n", meta.Name, meta.Help)
+		}
+		if meta.Type != "" {
+			fmt.Fprintf(printer.w, "# TYPE %s %s\n", meta.Name, meta.Type)
+		}
+		if meta.Unit != "" {
+			fmt.Fprintf(printer.w, "# UNIT %s %s\n", meta.Name, meta.Unit)
+		}
+	}
+	var err error
 	if strings.Contains(meta.DisplayHint, "x:") {
 		sb := strings.Builder{}
 		for i, b := range []byte(s) {
@@ -95,16 +110,23 @@ func (printer *MetricPrinter) Handle(ctx context.Context, vb *VarBind) error {
 			sb.WriteString(fmt.Sprintf("%02x", b))
 		}
 		s = sb.String()
-		fmt.Fprintf(printer.w, "%s{value=%q} 1\n", name, s)
+		_, err = fmt.Fprintf(printer.w, "%s{value=%q} 1\n", meta.Name, s)
 	} else if strings.Contains(meta.DisplayHint, "a") {
-		fmt.Fprintf(printer.w, "%s{value=%q} 1\n", name, s)
+		_, err = fmt.Fprintf(printer.w, "%s{value=%q} 1\n", meta.Name, s)
+	} else if meta.DisplayHint == "e" {
+		n, _ := strconv.Atoi(s)
+		s, ok := meta.Enums[n]
+		if !ok {
+			s = fmt.Sprintf("%d", n)
+		}
+		_, err = fmt.Fprintf(printer.w, "%s{value=\"%s\"} 1\n", meta.Name, s)
 	} else {
-		fmt.Fprintf(printer.w, "%s %s\n", name, s)
+		_, err = fmt.Fprintf(printer.w, "%s %s\n", meta.Name, s)
 	}
-	return nil
+	return err
 }
 
-func (m *MetricPrinter) Flush(ctx context.Context) error {
+func (printer *MetricPrinter) Flush(ctx context.Context) error {
 	return nil
 }
 
@@ -115,10 +137,13 @@ func (printer *MetricPrinter) MetaDataForBranch(branch *mibdb.OidBranch) *Metric
 	}
 
 	//generate meta
-	meta = &MetricMeta{}
-	value, ok := branch.Definition().(mibdb.Value)
-	if !ok {
-		return meta
+	meta = &MetricMeta{
+		Name: branch.Value().Name(),
+	}
+	value := branch.Value()
+
+	if meta.Name == "ifType" {
+		print("debug - ifType")
 	}
 
 	meta.Help, _ = value.Get("DESCRIPTION").(string)
@@ -132,32 +157,68 @@ func (printer *MetricPrinter) MetaDataForBranch(branch *mibdb.OidBranch) *Metric
 		if meta.Help != "" {
 			meta.Help += " "
 		}
-		meta.Help += "(OID: " + branch.OID().String() + ")"
+		meta.Help += "(OID: " + branch.Value().OID().String() + ")"
 	}
+
 	meta.DisplayHint, _ = value.Get("DISPLAY-HINT").(string)
-	if meta.DisplayHint == "" {
-		syntax := value.Get("SYNTAX")
-		if syntax != nil {
-			switch syntax := syntax.(type) {
-			case *mibdb.TypeReference:
-				//TODO better lookup of type and thus inferring of DisplayHint
-				switch syntax.Name() {
-				case "OBJECT IDENTIFIER":
-					meta.DisplayHint = "a"
-				case "DisplayString":
-					meta.DisplayHint = "a"
-				case "IpAddress", "NetworkAddress":
-					meta.DisplayHint = "a"
-				case "PhysAddress":
-					meta.DisplayHint = "x:"
-				case "Counter", "Counter32", "Counter64":
-					meta.Type = "COUNTER"
+	syntax := value.Get("SYNTAX")
+findDisplayHint:
+	for meta.DisplayHint == "" && syntax != nil {
+		switch syntax2 := syntax.(type) {
+		case *mibdb.TypeReference:
+			//TODO better lookup of type and thus inferring of DisplayHint
+			switch syntax2.Name() {
+			case "INTEGER":
+				meta.Enums = syntax2.CompileEnums()
+				if meta.Enums == nil {
+					meta.DisplayHint = "n"
+				} else {
+					meta.DisplayHint = "e"
 				}
+				break findDisplayHint
+			case "OBJECT IDENTIFIER":
+				meta.DisplayHint = "a"
+			case "DisplayString":
+				meta.DisplayHint = "a"
+			case "IpAddress", "NetworkAddress":
+				meta.DisplayHint = "a"
+			case "PhysAddress":
+				meta.DisplayHint = "x:"
+			case "Counter", "Counter32", "Counter64":
+				meta.Type = "COUNTER"
+				meta.DisplayHint = "n"
 			default:
-				//pass
+				def, _ := printer.db.LookupName(syntax2.Name())
+				syntax3, _ := def.(mibdb.Value)
+				if syntax3 == syntax {
+					break findDisplayHint
+				}
+				syntax = syntax3
 			}
+		default:
+			break findDisplayHint
 		}
 	}
+
+	index := value.Get("INDEX")
+	if index != nil {
+		meta.Table = &TableStructure{}
+		valueList, ok := index.(*mibdb.ValueList)
+		if ok {
+			for _, value := range *valueList {
+				compositeValue, ok := value.(*mibdb.CompositeValue)
+				if ok {
+					v := compositeValue.Get("0")
+					s, ok := v.(string)
+					if ok {
+						meta.Table.Columns = append(meta.Table.Columns, s)
+					}
+				}
+			}
+		}
+		print(strings.Join(meta.Table.Columns, ",") + "\n")
+	}
+
 	branch.Set("metricMeta", meta)
 	return meta
 }

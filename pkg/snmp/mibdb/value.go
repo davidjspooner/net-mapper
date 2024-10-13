@@ -3,6 +3,7 @@ package mibdb
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
@@ -34,8 +35,8 @@ func (base *valueBase) compileMeta(ctx context.Context) error {
 	}
 	def, _, err := Lookup[Definition](ctx, tok.String())
 	if err != nil {
-		tokStr := tok.String()
-		Lookup[Definition](ctx, tokStr)
+		//tokStr := tok.String()
+		//Lookup[Definition](ctx, tokStr)
 		return tok.WrapError(err)
 	}
 	_, ok := def.(*TypeReference)
@@ -88,6 +89,7 @@ type CompilableValue interface {
 
 type OidValue struct {
 	valueBase
+	name     string
 	elements []string
 	compiled asn1go.OID
 }
@@ -127,6 +129,9 @@ func (value *OidValue) readOid(_ context.Context, s mibtoken.Reader) error {
 		return nil
 	}
 	value.elements = append(value.elements, peek.String())
+	if value.name == "" {
+		value.name = peek.String()
+	}
 	s.Pop()
 	return nil
 }
@@ -135,7 +140,14 @@ func (value *OidValue) Source() mibtoken.Source {
 	return value.source
 }
 
+func (value *OidValue) Name() string {
+	return value.name
+}
+
 func (value *OidValue) compileValue(ctx context.Context, module *Module) (Value, error) {
+	if value.name == "atEntry" {
+		print("debug - atEntry")
+	}
 	err := value.valueBase.compileMeta(ctx)
 	if err != nil {
 		return nil, err
@@ -238,6 +250,9 @@ func (expected *ExpectedToken) readValue(ctx context.Context, module *Module, s 
 	}
 	actual := peek.String()
 	if actual == expected.text {
+		//		if expected.text == "INDEX" {
+		//			print("debug - INDEX")
+		//		}
 		s.Pop()
 		return nil, nil
 	}
@@ -278,6 +293,8 @@ func (value *CompositeValue) Get(name string) any {
 	switch elem := elem.(type) {
 	case *GoValue[string]:
 		return elem.value
+	case *OidValue:
+		return strings.Join(elem.elements, ".")
 	default:
 		return elem
 	}

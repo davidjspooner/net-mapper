@@ -86,6 +86,13 @@ func (patternSequence *patternSequence) readValue(ctx context.Context, module *M
 
 	ctx = patternSequence.valueBase.module.withContext(ctx)
 
+	//	src := s.Source()
+	//	debugEnable := false
+	//	if src.Filename == "/mnt/homelab-atom/static/mib/RFC1213-MIB.mib" && src.Line == 616 {
+	//		print("debug - RFC1213-MIB.mib:615\n")
+	//		debugEnable = true
+	//	}
+
 	depth := getDepth(ctx)
 	if depth.Inc(patternSequence) > 100 {
 		return nil, patternSequence.source.Errorf("depth limit reached")
@@ -101,7 +108,9 @@ func (patternSequence *patternSequence) readValue(ctx context.Context, module *M
 	}
 
 	for i, pattern := range patternSequence.pattern {
-
+		//	if debugEnable && i == 10 {
+		//		print("debug - INDEX\n")
+		//	}
 		value, err := pattern.readValue(ctx, module, tmp)
 		if err != nil {
 			return nil, err
@@ -114,6 +123,7 @@ func (patternSequence *patternSequence) readValue(ctx context.Context, module *M
 				}
 			} else if lastName != "" {
 				composite.fields[lastName] = value
+				lastName = ""
 			} else {
 				composite.fields[fmt.Sprintf("%d", i)] = value
 			}
@@ -123,6 +133,9 @@ func (patternSequence *patternSequence) readValue(ctx context.Context, module *M
 				c := expected.text[0]
 				if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
 					lastName = expected.text
+					//					if lastName == "INDEX" {
+					//						print("debug - INDEX\n")
+					//					}
 				}
 			}
 		}

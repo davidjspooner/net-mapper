@@ -65,7 +65,7 @@ func DecodeValue(db *mibdb.Database, v *asn1binary.Value) (string, ValueType, er
 			err := v.UnpackIntoGo(&oid)
 			// Look up the OID in the MIB database
 			branch, tail := db.FindOID(oid)
-			s := branch.Name()
+			s := branch.Value().Name()
 			if len(tail) > 0 {
 				s += "." + tail.String()
 			}

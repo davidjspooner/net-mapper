@@ -162,7 +162,7 @@ func (module *Module) read(ctx context.Context, s mibtoken.Reader) error {
 			peekStr := peek.String()
 
 			if peekStr == "{" {
-				oid := &OidValue{}
+				oid := &OidValue{name: name.String()}
 				oid.set(module, metaTokens, *name.Source())
 				err = oid.readOid(ctx, s)
 				if err != nil {

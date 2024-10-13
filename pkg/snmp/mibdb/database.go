@@ -48,54 +48,92 @@ func New(logger *slog.Logger) *Database {
 	}
 	builtin.definitions["iso"] = d.MustReadBuiltInValue(ctx, mibtoken.Object_Identifier, "{ 1 }")
 	builtin.definitions["OBJECT-TYPE"] = d.MustReadMacroDefinition(ctx, "OBJECT-TYPE", `
-          BEGIN
-              TYPE NOTATION ::=
-                                        -- must conform to
-                                        -- RFC1155's ObjectSyntax
-                                "SYNTAX" type(ObjectSyntax)
-                                "MAX-ACCESS" Access
-                                "STATUS" Status
-                                DescrPart
-                                ReferPart
-                                IndexPart
-                                DefValPart
-              VALUE NOTATION ::= value (VALUE ObjectName)
-        
-              Access ::= "read-only"
-                              | "read-write"
-                              | "write-only"
-                              | "not-accessible"
-              Status ::= "mandatory"
-                              | "optional"
-                              | "obsolete"
-                              | "deprecated"
-							  | "current"
-        
-              DescrPart ::=
-                         "DESCRIPTION" value (description DisplayString)
-                              | empty
-        
-              ReferPart ::=
-                         "REFERENCE" value (reference DisplayString)
-                              | empty
-        
-              IndexPart ::=
-                         "INDEX" "{" IndexTypes "}"
-                              | empty
-              IndexTypes ::=
-                         IndexType | IndexTypes "," IndexType
-   			  IndexType ::=
-							"IMPLIED" Index
-							| Index
+		BEGIN
+			TYPE NOTATION ::=
+						"SYNTAX" Syntax
+						UnitsPart
+						"MAX-ACCESS" Access
+						"STATUS" Status
+						"DESCRIPTION" Text
+						ReferPart
+						IndexPart
+						DefValPart
 
-			  Index ::=
-						-- use the SYNTAX value of the
-						-- correspondent OBJECT-TYPE invocation
-						value(ObjectName)        
-              DefValPart ::=
-                         "DEFVAL" "{" value (defvalue ObjectSyntax) "}"
-                              | empty
-          END
+			VALUE NOTATION ::=
+						value(VALUE ObjectName)
+
+			Syntax ::=   -- Must be one of the following:
+							-- a base type (or its refinement),
+							-- a textual convention (or its refinement), or
+							-- a BITS pseudo-type
+						type
+						| "BITS" "{" NamedBits "}"
+
+			NamedBits ::= NamedBit
+						| NamedBits "," NamedBit
+
+			NamedBit ::=  identifier "(" number ")" -- number is nonnegative
+
+			UnitsPart ::=
+						"UNITS" Text
+						| empty
+
+			Access ::=
+						"not-accessible"
+						| "accessible-for-notify"
+						| "read-only"
+						| "read-write"
+						| "read-create"
+
+			Status ::=
+						"current"
+						| "deprecated"
+						| "obsolete"
+						| "mandatory"
+
+			ReferPart ::=
+						"REFERENCE" Text
+						| empty
+
+			IndexPart ::=
+						"INDEX"    "{" IndexTypes "}"
+						| "AUGMENTS" "{" Entry      "}"
+						| empty
+			IndexTypes ::=
+						IndexType
+						| IndexTypes "," IndexType
+			IndexType ::=
+						"IMPLIED" Index
+						| Index
+
+			Index ::=
+							-- use the SYNTAX value of the
+							-- correspondent OBJECT-TYPE invocation
+						value(OBJECT IDENTIFIER)
+			Entry ::=
+							-- use the INDEX value of the
+							-- correspondent OBJECT-TYPE invocation
+						value(OBJECT IDENTIFIER)
+
+			DefValPart ::= "DEFVAL" "{" Defvalue "}"
+						| empty
+
+			Defvalue ::=  -- must be valid for the type specified in
+						-- SYNTAX clause of same OBJECT-TYPE macro
+						value(ObjectSyntax)
+						| "{" BitsValue "}"
+
+			BitsValue ::= BitNames
+						| empty
+
+			BitNames ::=  BitName
+						| BitNames "," BitName
+
+			BitName ::= identifier
+
+			-- a character string as defined in section 3.1.1
+			Text ::= value(IA5String)
+		END
 	`)
 
 	builtin.definitions["TRAP-TYPE"] = d.MustReadMacroDefinition(ctx, "TRAP-TYPE", `
@@ -113,7 +151,7 @@ func New(logger *slog.Logger) *Database {
               VarTypes ::=
                          VarType | VarTypes "," VarType
               VarType ::=
-                         value (vartype ObjectName)
+                         value (vartype OBJECT IDENTIFIER)
         
               DescrPart ::=
                          "DESCRIPTION" value (description DisplayString)
@@ -254,21 +292,32 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 	}
 
 	for _, module := range d.modules {
-		for name, def := range module.definitions {
+		for _, def := range module.definitions {
 			oid, ok := def.(*OidValue)
 			if !ok {
 				continue
 			}
-			d.root.addDefinition(oid.compiled, name, oid)
-			//TODO handle tables
+			d.root.addDefinition(oid.compiled, oid)
 		}
 	}
+
 	d.logger.DebugContext(ctx, "Finished creating index")
 	return nil
 }
 
 func (d *Database) FindOID(oid asn1go.OID) (*OidBranch, asn1go.OID) {
 	return d.root.findOID(oid)
+}
+
+func (d *Database) LookupName(name string) (Definition, *Module) {
+	for _, module := range d.modules {
+		def, ok := module.definitions[name]
+		if !ok {
+			continue
+		}
+		return def, module
+	}
+	return nil, nil
 }
 
 func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text string) Value {

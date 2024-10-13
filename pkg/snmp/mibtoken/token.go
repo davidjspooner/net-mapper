@@ -94,9 +94,6 @@ func (t Token) Type() TokenType {
 
 func (t *Token) WrapError(err error) error {
 	err = t.position.WrapError(err)
-	// if t.value == "" {
-	// 	print("Token value is empty in mibtoken.Token.WrapError")
-	// }
 	return err
 }
 
