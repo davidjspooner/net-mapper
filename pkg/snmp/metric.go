@@ -2,7 +2,6 @@ package snmp
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 )
@@ -27,25 +26,25 @@ type RowIndex string
 
 type MetricName string
 
-type MetricValues struct {
-	Meta   *MetricMeta
-	Values map[RowIndex]Value
-}
-
 type Value struct {
 	Text    string
 	Numeric bool
 	//Value   asn1binary.Value
 }
 
+type MetricValues struct {
+	Meta   *MetricMeta
+	Values map[RowIndex]Value
+}
+
 func (mv *MetricValues) AddMetric(row RowIndex, value Value) error {
-	other, exists := mv.Values[row]
-	if exists {
-		if reflect.DeepEqual(value, other) {
-			return nil
-		}
-		//return fmt.Errorf("duplicate row %s: %v, %v", row, other, value)
-	}
+	//	other, exists := mv.Values[row]
+	//	if exists {
+	//		if reflect.DeepEqual(value, other) {
+	//			return nil
+	//		}
+	//		//return fmt.Errorf("duplicate row %s: %v, %v", row, other, value)
+	//	}
 	mv.Values[row] = value
 	return nil
 }
@@ -91,16 +90,19 @@ func (mb *MetricBlock) Init(tableMeta *TableMeta) {
 	mb.RowIndexes = mb.RowIndexes[:0]
 }
 
-func (mb *MetricBlock) LabelMap() map[RowIndex]string {
-
-	if mb.TableMeta == nil {
-		return nil
+// findCommonPrefix finds the common prefix among metric names.
+func findCommonPrefix(metricNames []MetricName) MetricName {
+	if len(metricNames) == 0 {
+		return ""
 	}
 
-	prefix := mb.MetricNames[0]
-	for i := 1; i < len(mb.MetricNames); i++ {
-		name := mb.MetricNames[i]
-		//find the common prefix
+	prefix := metricNames[0]
+	for i := 1; i < len(metricNames); i++ {
+		name := metricNames[i]
+		if len(name) < len(prefix) {
+			prefix = prefix[:len(name)]
+		}
+		// Find the common prefix
 		for j := 0; j < len(prefix); j++ {
 			if prefix[j] != name[j] {
 				prefix = prefix[:j]
@@ -108,10 +110,21 @@ func (mb *MetricBlock) LabelMap() map[RowIndex]string {
 			}
 		}
 	}
+	return prefix
+}
+
+func (mb *MetricBlock) LabelMap() map[RowIndex]string {
+
+	if mb.TableMeta == nil {
+		return nil
+	}
+
+	prefix := findCommonPrefix(mb.MetricNames)
 
 	labelMap := make(map[RowIndex]string)
+	sb := &strings.Builder{}
 	for _, index := range mb.RowIndexes {
-		sb := &strings.Builder{}
+		sb.Reset()
 		for j, columnName := range mb.TableMeta.Index {
 			indexValues := mb.Metrics[columnName]
 			if indexValues != nil {
