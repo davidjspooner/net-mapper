@@ -50,6 +50,44 @@ func (t ValueType) String() string {
 	return "Unknown"
 }
 
+type ValueFormatFunc func([]byte) any
+
+var valueFormatFuncMap map[ValueType]ValueFormatFunc
+
+func init() {
+	valueFormatFuncMap = make(map[ValueType]ValueFormatFunc)
+	valueFormatFuncMap[NullValue] = func(b []byte) any {
+		return ""
+	}
+	valueFormatFuncMap[StringValue] = func(b []byte) any {
+		v := asn1go.String{}
+		v.UnpackAsn1(asn1binary.Envelope{Tag: asn1binary.TagOctetString}, b)
+		return v.String()
+	}
+	valueFormatFuncMap[IntegerValue] = func(b []byte) any {
+		v := asn1go.Integer{}
+		v.UnpackAsn1(asn1binary.Envelope{Tag: asn1binary.TagInteger}, b)
+		n, _ := v.GetInt(64)
+		return n
+	}
+	valueFormatFuncMap[CounterValue] = valueFormatFuncMap[IntegerValue]
+	valueFormatFuncMap[GaugeValue] = valueFormatFuncMap[IntegerValue]
+	valueFormatFuncMap[TimeTicksValue] = valueFormatFuncMap[IntegerValue]
+	valueFormatFuncMap[OidValue] = func(b []byte) any {
+		v := asn1go.OID{}
+		v.UnpackAsn1(asn1binary.Envelope{Tag: asn1binary.TagOID}, b)
+		return v.String()
+	}
+	valueFormatFuncMap[IPValue] = func(b []byte) any {
+		v := net.IP(b)
+		return v.String()
+	}
+	valueFormatFuncMap[OpaqueValue] = func(b []byte) any {
+		return b
+	}
+	valueFormatFuncMap[UnsignedValue] = valueFormatFuncMap[IntegerValue]
+}
+
 func DecodeValue(db *mibdb.Database, v *asn1binary.Value) (string, ValueType, error) {
 	switch v.Class {
 	case asn1binary.ClassUniversal:
@@ -65,7 +103,7 @@ func DecodeValue(db *mibdb.Database, v *asn1binary.Value) (string, ValueType, er
 			err := v.UnpackIntoGo(&oid)
 			// Look up the OID in the MIB database
 			branch, tail := db.FindOID(oid)
-			s := branch.Value().Name()
+			s := branch.Object().Name()
 			if len(tail) > 0 {
 				s += "." + tail.String()
 			}

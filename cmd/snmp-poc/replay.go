@@ -67,7 +67,6 @@ func PlaybackIpFramesFromStream(f *os.File, handler IPFrameHandler) error {
 		} else if IPV6 := packet.Layer(layers.LayerTypeIPv6); IPV6 != nil {
 			ip := IPV6.(*layers.IPv6)
 			ipFrame.IsFragment = false
-			//TODO ipFrame.IsFragment = ip.FragmentOffset != 0
 			ipFrame.IPProtocol = uint8(ip.NextHeader)
 			ipFrame.SrcAddr = net.IPAddr{IP: ip.SrcIP}
 			ipFrame.DstAddr = net.IPAddr{IP: ip.DstIP}

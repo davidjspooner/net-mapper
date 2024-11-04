@@ -1,6 +1,8 @@
 package snmp
 
 import (
+	"context"
+
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1binary"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 )
@@ -32,6 +34,10 @@ type VarBind struct {
 	Value asn1binary.Value
 }
 
+func (vb *VarBind) String() string {
+	return vb.OID.String() + ": " + vb.Value.String()
+}
+
 type PDU struct {
 	asn1binary.Envelope
 	RequestID   int
@@ -45,3 +51,21 @@ type Message struct {
 	Community string `asn1:"OctetString"`
 	PDU       PDU
 }
+
+type VarBindHandler interface {
+	Handle(ctx context.Context, VarBind *VarBind) error
+	Flush(ctx context.Context) error
+}
+
+//-------------------------------------
+
+type VarBindHandlerFunc func(ctx context.Context, VarBind *VarBind) error
+
+func (f VarBindHandlerFunc) Handle(ctx context.Context, vb *VarBind) error {
+	return f(ctx, vb)
+}
+func (f VarBindHandlerFunc) Flush(ctx context.Context) error {
+	return f(ctx, nil)
+}
+
+//-------------------------------------

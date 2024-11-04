@@ -2,19 +2,33 @@ package mibdb
 
 import (
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
+	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 )
 
 type DefinitionIndex map[string]Definition
 
 type OidBranch struct {
-	Stash
 	parent   *OidBranch
-	def      *OidValue
+	def      *Object
 	children map[int]*OidBranch
 }
 
-func (branch *OidBranch) Value() *OidValue {
+func (branch *OidBranch) Object() *Object {
 	return branch.def
+}
+
+func (branch *OidBranch) ChildValues() []*Object {
+	var values []*Object
+	keys := maps.Keys(branch.children)
+	slices.Sort(keys)
+	for _, key := range keys {
+		child := branch.children[key]
+		if child.def != nil {
+			values = append(values, child.def)
+		}
+	}
+	return values
 }
 
 func (branch *OidBranch) Parent() *OidBranch {
@@ -37,7 +51,7 @@ func (branch *OidBranch) findOID(oid asn1go.OID) (*OidBranch, asn1go.OID) {
 	}
 }
 
-func (branch *OidBranch) addDefinition(oid asn1go.OID, def *OidValue) {
+func (branch *OidBranch) addDefinition(oid asn1go.OID, def *Object) {
 	if len(oid) == 0 {
 		branch.def = def
 		return

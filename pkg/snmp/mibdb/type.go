@@ -135,7 +135,6 @@ func (ref *TypeReference) readOneValue(ctx context.Context, module *Module, s mi
 		value.set(module, ref.metaTokens, *tok.Source())
 		return value, nil
 	case "value":
-		//TODO read an identifier defintion....
 		other := &ConstantValue{}
 		other.set(module, ref.metaTokens, *s.Source())
 		err := other.read(ctx, s)
@@ -144,7 +143,6 @@ func (ref *TypeReference) readOneValue(ctx context.Context, module *Module, s mi
 		}
 		return other, nil
 	case "identifier":
-		//TODO read an identifier defintion....
 		other := &TypeReference{}
 		other.set(module, ref.metaTokens, *s.Source())
 		err := other.readDefinition(ctx, module, s)
@@ -223,7 +221,7 @@ func (ref *TypeReference) readValue(ctx context.Context, module *Module, s mibto
 }
 
 func (ref *TypeReference) readObjectIdentifierValue(ctx context.Context, s mibtoken.Reader) (Value, error) {
-	oidValue := &OidValue{}
+	oidValue := &Object{}
 	err := oidValue.readOid(ctx, s)
 	if err != nil {
 		return nil, err
@@ -264,6 +262,21 @@ func (ref *TypeReference) CompileEnums() map[int]string {
 		}
 	}
 	return mapping
+}
+
+func (ref *TypeReference) CompileColumns() ([]string, error) {
+	if ref.constraint == nil {
+		return nil, nil
+	}
+	copy := mibtoken.NewProjection(ref.constraint)
+	columns := []string{}
+	for !copy.IsEOF() {
+		cName, _ := copy.Pop()
+		copy.Pop()
+		copy.Pop()
+		columns = append(columns, cName.String())
+	}
+	return columns, nil
 }
 
 // ------------------------------------

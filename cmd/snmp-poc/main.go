@@ -128,5 +128,8 @@ func main() {
 		return
 	}
 
-	DecodeDump(ctx, "/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
+	err=DecodeDump(ctx, "/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
+	if err != nil {
+		fmt.Printf("Error decoding dump: %v\n", err)
+	}
 }

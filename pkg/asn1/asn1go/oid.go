@@ -107,3 +107,13 @@ func ParseOID(s string, oidLookupFn func(string) (OID, error)) (OID, error) {
 	}
 	return oid, nil
 }
+
+func (o OID) LessThan(other OID) bool {
+	mLen := min(len(o), len(other))
+	for i := 0; i < mLen; i++ {
+		if o[i] != other[i] {
+			return o[i] < other[i]
+		}
+	}
+	return len(o) < len(other)
+}

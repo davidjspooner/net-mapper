@@ -293,7 +293,7 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 
 	for _, module := range d.modules {
 		for _, def := range module.definitions {
-			oid, ok := def.(*OidValue)
+			oid, ok := def.(*Object)
 			if !ok {
 				continue
 			}
