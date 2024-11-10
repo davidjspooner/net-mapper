@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-type TableMeta struct {
-	Name    string
-	Prefix  string
-	Index   []MetricName
-	Columns []*MetricMeta
+type Table struct {
+	prefix     string
+	metricMeta *MetricMeta
+	index      []MetricName
+	columns    []*MetricMeta
 }
 
 type MetricFlag uint
@@ -21,19 +21,18 @@ const (
 )
 
 type MetricMeta struct {
-	Name        MetricName
-	SnakeName   string
-	SnmpType    string
-	Help, Type  string
-	DisplayHint string
-	Formatter   ValueFormatFunc
-	Enums       map[int]string
-	TableMeta   *TableMeta
-	Flags       MetricFlag
+	name        MetricName
+	snakeName   string
+	snmpType    string
+	help, Type  string
+	displayHint string
+	enums       map[int]string
+	table       *Table
+	flags       MetricFlag
 }
 
 func (meta *MetricMeta) IsLabel() bool {
-	return meta.Flags&(MetricIsString|MetricIsPartOfIndex) != 0
+	return meta.flags&(MetricIsString|MetricIsPartOfIndex) != 0
 }
 
 type RowIndex string
@@ -41,9 +40,8 @@ type RowIndex string
 type MetricName string
 
 type Value struct {
-	Text    string
-	Numeric bool
-	//Value   asn1binary.Value
+	text    string
+	numeric bool
 }
 
 type MetricValues struct {
@@ -64,44 +62,44 @@ func (mv *MetricValues) AddMetric(row RowIndex, value Value) error {
 }
 
 type MetricBlock struct { //map of lists
-	TableMeta   *TableMeta
-	RowIndexes  []RowIndex
-	MetricNames []MetricName
-	Metrics     map[MetricName]*MetricValues
+	table       *Table
+	rowIndexes  []RowIndex
+	metricNames []MetricName
+	metrics     map[MetricName]*MetricValues
 }
 
 func (mb *MetricBlock) IsNewRow(index RowIndex) bool {
-	if slices.Contains(mb.RowIndexes, index) {
+	if slices.Contains(mb.rowIndexes, index) {
 		return false
 	}
-	mb.RowIndexes = append(mb.RowIndexes, index)
+	mb.rowIndexes = append(mb.rowIndexes, index)
 	return true
 }
 
 func (mb *MetricBlock) AddMetric(printer *MetricPrinter, meta *MetricMeta, row RowIndex, value Value) error {
-	values, ok := mb.Metrics[meta.Name]
+	values, ok := mb.metrics[meta.name]
 	if !ok {
-		mb.MetricNames = append(mb.MetricNames, meta.Name)
+		mb.metricNames = append(mb.metricNames, meta.name)
 		values = &MetricValues{
 			Meta:   meta,
 			Values: make(map[RowIndex]Value),
 		}
-		mb.Metrics[meta.Name] = values
+		mb.metrics[meta.name] = values
 	}
 	err := values.AddMetric(row, value)
 	return err
 }
 
-func (mb *MetricBlock) Init(tableMeta *TableMeta) {
-	mb.TableMeta = tableMeta
-	mb.Metrics = make(map[MetricName]*MetricValues)
-	if mb.MetricNames == nil {
-		mb.MetricNames = make([]MetricName, 0, 16)
-		mb.RowIndexes = make([]RowIndex, 0, 16)
+func (mb *MetricBlock) Init(tableMeta *Table) {
+	mb.table = tableMeta
+	mb.metrics = make(map[MetricName]*MetricValues)
+	if mb.metricNames == nil {
+		mb.metricNames = make([]MetricName, 0, 16)
+		mb.rowIndexes = make([]RowIndex, 0, 16)
 		return
 	}
-	mb.MetricNames = mb.MetricNames[:0]
-	mb.RowIndexes = mb.RowIndexes[:0]
+	mb.metricNames = mb.metricNames[:0]
+	mb.rowIndexes = mb.rowIndexes[:0]
 }
 
 // findCommonPrefix finds the common prefix among metric names.
@@ -117,29 +115,29 @@ func findCommonPrefix(a, b string) string {
 
 func (mb *MetricBlock) LabelMap() map[RowIndex]string {
 
-	if mb.TableMeta == nil {
+	if mb.table == nil {
 		return nil
 	}
 
-	prefixLen := len(mb.TableMeta.Prefix)
+	prefixLen := len(mb.table.prefix)
 
 	labelMap := make(map[RowIndex]string)
 	sb := &strings.Builder{}
-	for _, index := range mb.RowIndexes {
+	for _, index := range mb.rowIndexes {
 		sb.Reset()
-		for j, column := range mb.TableMeta.Columns {
+		for j, column := range mb.table.columns {
 			if column.IsLabel() {
 				if j > 0 {
 					sb.WriteString(",")
 				}
-				metrics := mb.Metrics[column.Name]
+				metrics := mb.metrics[column.name]
 				if metrics == nil {
 					continue
 				}
 				indexValue, ok := metrics.Values[index]
-				columnName := column.SnakeName[prefixLen:]
+				columnName := column.snakeName[prefixLen:]
 				if ok {
-					fmt.Fprintf(sb, "%s=%q", columnName, indexValue.Text)
+					fmt.Fprintf(sb, "%s=%q", columnName, indexValue.text)
 				} else {
 					fmt.Fprintf(sb, "%s=%q", columnName, "")
 				}

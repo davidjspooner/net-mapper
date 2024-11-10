@@ -11,13 +11,15 @@ import (
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1go"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibtoken"
+	"golang.org/x/exp/maps"
 )
 
 type Database struct {
-	modules   map[string]*Module
-	filenames []string
-	root      OidBranch
-	logger    *slog.Logger
+	modules     map[string]*Module
+	filenames   []string
+	root        OidBranch
+	logger      *slog.Logger
+	definitions map[string]Definition
 }
 
 const builtInModuleName = "<builtin>"
@@ -38,7 +40,7 @@ func New(logger *slog.Logger) *Database {
 		exports:     nil,
 		definitions: make(map[string]Definition),
 	}
-	d.modules["<builtin>"] = builtin
+	d.modules[builtInModuleName] = builtin
 
 	ctx := builtin.withContext(context.Background())
 	ctx = withDepthContect(ctx)
@@ -281,7 +283,7 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 
 	//read all the mibs ( but dont try and compile them yet)
 	err := d.readDefintions(ctx)
-	d.logger.DebugContext(ctx, "Finished reading definitions", slog.Any("error", err))
+	d.logger.DebugContext(ctx, "Finished reading MIB files", slog.Any("error", err))
 	if err != nil {
 		return err
 	}
@@ -291,8 +293,12 @@ func (d *Database) CreateIndex(ctx context.Context) error {
 		return err
 	}
 
-	for _, module := range d.modules {
-		for _, def := range module.definitions {
+	d.definitions = make(map[string]Definition)
+	moduleNames := maps.Keys(d.modules)
+	for _, moduleName := range moduleNames {
+		module := d.modules[moduleName]
+		for name, def := range module.definitions {
+			d.definitions[name] = def
 			oid, ok := def.(*Object)
 			if !ok {
 				continue
@@ -309,15 +315,9 @@ func (d *Database) FindOID(oid asn1go.OID) (*OidBranch, asn1go.OID) {
 	return d.root.findOID(oid)
 }
 
-func (d *Database) LookupName(name string) (Definition, *Module) {
-	for _, module := range d.modules {
-		def, ok := module.definitions[name]
-		if !ok {
-			continue
-		}
-		return def, module
-	}
-	return nil, nil
+func (d *Database) LookupName(name string) Definition {
+	def := d.definitions[name]
+	return def
 }
 
 func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text string) Value {
@@ -340,8 +340,8 @@ func (d *Database) MustReadBuiltInValue(ctx context.Context, valueTypeName, text
 
 func (d *Database) MustReadMacroDefinition(ctx context.Context, name, text string) *MacroDefintion {
 	r := strings.NewReader(text)
-	s, err := mibtoken.NewScanner(r, mibtoken.WithSource("<built-in>"), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
-	builtin := d.modules["<builtin>"]
+	s, err := mibtoken.NewScanner(r, mibtoken.WithSource(builtInModuleName), mibtoken.WithSkip(mibtoken.WHITESPACE, mibtoken.COMMENT))
+	builtin := d.modules[builtInModuleName]
 	if err != nil {
 		panic(err)
 	}
