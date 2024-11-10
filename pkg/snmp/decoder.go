@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,75 +126,67 @@ func (printer *MetricPrinter) queueLine(ctx context.Context, meta *MetricMeta, t
 	//err := printer.printLine(ctx, meta, index, s, numeric)
 	return err
 }
+
+func (printer *MetricPrinter) printMetricRows(values *MetricValues, labelMap map[RowIndex]string) (int, error) {
+	output_count := 0
+	printed_header := false
+	for _, row := range printer.metricBlock.RowIndexes {
+		value, ok := values.Values[row]
+		if ok {
+			if !value.Numeric {
+				continue
+			}
+			var err error
+			labels := labelMap[row]
+			if !printed_header {
+				if values.Meta.Help != "" {
+					fmt.Fprintf(printer.w, "# HELP %s %s\n", values.Meta.SnakeName, values.Meta.Help)
+				}
+				if values.Meta.Type != "" {
+					fmt.Fprintf(printer.w, "# TYPE %s %s\n", values.Meta.SnakeName, values.Meta.Type)
+				}
+				printed_header = true
+			}
+			if len(labels) == 0 {
+				_, err = fmt.Fprintf(printer.w, "%s %s\n", values.Meta.SnakeName, value.Text)
+			} else {
+				_, err = fmt.Fprintf(printer.w, "%s{%s} %s\n", values.Meta.SnakeName, labels, value.Text)
+			}
+			if err != nil {
+				return output_count, err
+			}
+			output_count++
+		}
+	}
+	return output_count, nil
+}
+
 func (printer *MetricPrinter) Flush(ctx context.Context) error {
 
 	labelMap := printer.metricBlock.LabelMap()
 
+	output_count := 0
 	for _, metricName := range printer.metricBlock.MetricNames {
-
-		if printer.metricBlock.TableMeta != nil {
-			if slices.Contains(printer.metricBlock.TableMeta.Index, metricName) {
-				continue
-			}
-		}
-
 		values := printer.metricBlock.Metrics[metricName]
-		if values.Meta.Help != "" {
-			fmt.Fprintf(printer.w, "# HELP %s %s\n", values.Meta.Name, values.Meta.Help)
+		if values.Meta.IsLabel() {
+			continue
 		}
-		if values.Meta.Type != "" {
-			fmt.Fprintf(printer.w, "# TYPE %s %s\n", values.Meta.Name, values.Meta.Type)
+		n, err := printer.printMetricRows(values, labelMap)
+		if err != nil {
+			return err
 		}
-		for _, row := range printer.metricBlock.RowIndexes {
-			value, ok := values.Values[row]
-			if ok {
-				var err error
-				labels := labelMap[row]
-				if value.Numeric {
-					if len(labels) == 0 {
-						_, err = fmt.Fprintf(printer.w, "%s %s\n", values.Meta.Name, value.Text)
-					} else {
-						_, err = fmt.Fprintf(printer.w, "%s{%s} %s\n", values.Meta.Name, labels, value.Text)
-					}
-				} else {
-					if len(labels) == 0 {
-						_, err = fmt.Fprintf(printer.w, "%s{value=%q} 1\n", values.Meta.Name, value.Text)
-					} else {
-						_, err = fmt.Fprintf(printer.w, "%s{%s,value=%q} 1\n", values.Meta.Name, labels, value.Text)
-					}
-				}
-				if err != nil {
-					return err
-				}
-			}
-		}
+		output_count += n
+	}
+	if output_count == 0 && printer.metricBlock.TableMeta != nil {
+		//TODO print empty table ( eg each row with metricname = table and  value = 1)
 	}
 	return nil
 }
 
-func (printer *MetricPrinter) MetaDataForObject(object *mibdb.Object, children []*mibdb.Object) *MetricMeta {
-	meta, _ := object.Get("metricMeta").(*MetricMeta)
-	if meta != nil {
-		return meta
+func (printer *MetricPrinter) calculateDisplayHint(object *mibdb.Object, meta *MetricMeta) {
+	if meta.DisplayHint != "" {
+		return
 	}
-
-	meta = &MetricMeta{
-		Name: MetricName(object.Name()),
-	}
-	meta.Help, _ = object.Get("DESCRIPTION").(string)
-	if meta.Help != "" {
-		if len(meta.Help) > 100 {
-			dot := strings.IndexByte(meta.Help, '.')
-			if dot >= 0 {
-				meta.Help = meta.Help[:dot+1]
-			}
-		}
-		if meta.Help != "" {
-			meta.Help += " "
-		}
-		meta.Help += "(OID: " + object.OID().String() + ")"
-	}
-
 	meta.DisplayHint, _ = object.Get("DISPLAY-HINT").(string)
 	syntax := object.Get("SYNTAX")
 findDisplayHint:
@@ -208,26 +201,35 @@ findDisplayHint:
 					meta.DisplayHint = "n"
 				} else {
 					meta.DisplayHint = "e"
+					meta.Flags |= MetricIsString
 				}
 				break findDisplayHint
 			case "OBJECT IDENTIFIER":
 				meta.DisplayHint = "a"
+				meta.Flags |= MetricIsString
 			case "DisplayString":
 				meta.DisplayHint = "a"
-			case "Opaque":
+				meta.Flags |= MetricIsString
+			case "Opaque", "OCTET STRING":
 				meta.DisplayHint = "b"
+				meta.Flags |= MetricIsString
 			case "TimeTicks":
 				meta.DisplayHint = "n"
 			case "IpAddress", "NetworkAddress":
 				meta.DisplayHint = "n."
+				meta.Flags |= MetricIsString
 			case "PhysAddress":
 				meta.DisplayHint = "x:"
+				meta.Flags |= MetricIsString
 			case "Gauge32":
 				meta.Type = "GAUGE"
 				meta.DisplayHint = "n"
 			case "Counter", "Counter32", "Counter64":
 				meta.Type = "COUNTER"
 				meta.DisplayHint = "n"
+				if !strings.HasSuffix(meta.SnakeName, "_total") {
+					meta.SnakeName += "_total"
+				}
 			default:
 				def, _ := printer.db.LookupName(syntax2.Name())
 				syntax3, _ := def.(mibdb.Value)
@@ -236,10 +238,60 @@ findDisplayHint:
 				}
 				syntax = syntax3
 			}
+		case *mibdb.CompositeValue:
+			syntax = syntax2.Get("SYNTAX")
+			if syntax == syntax2 {
+				break findDisplayHint
+			}
 		default:
+			println("syntax type =", reflect.TypeOf(syntax).String())
 			break findDisplayHint
 		}
 	}
+}
+
+func (printer *MetricPrinter) ConvertCamelCaseToSnakeCase(name string) string {
+	sb := strings.Builder{}
+	var prev rune
+	for _, c := range name {
+		if (prev < 'A' || prev > 'Z') && c >= 'A' && c <= 'Z' {
+			sb.WriteByte('_')
+		}
+		sb.WriteRune(c)
+		prev = c
+	}
+	name = sb.String()
+	name = strings.ToLower(name)
+	return name
+}
+
+func (printer *MetricPrinter) MetaDataForObject(object *mibdb.Object, children []*mibdb.Object) *MetricMeta {
+	meta, _ := object.Get("metricMeta").(*MetricMeta)
+	if meta != nil {
+		return meta
+	}
+
+	name := object.Name()
+	meta = &MetricMeta{
+		Name:      MetricName(name),
+		SnakeName: printer.ConvertCamelCaseToSnakeCase(name),
+	}
+
+	meta.Help, _ = object.Get("DESCRIPTION").(string)
+	if meta.Help != "" {
+		if len(meta.Help) > 100 {
+			dot := strings.IndexByte(meta.Help, '.')
+			if dot >= 0 {
+				meta.Help = meta.Help[:dot+1]
+			}
+		}
+		if meta.Help != "" {
+			meta.Help += " "
+		}
+		meta.Help += "(OID: " + object.OID().String() + ")"
+	}
+
+	printer.calculateDisplayHint(object, meta)
 	index := object.Get("INDEX")
 	if index != nil {
 		meta.TableMeta = &TableMeta{}
@@ -256,12 +308,32 @@ findDisplayHint:
 				}
 			}
 		}
-	}
-	if meta.TableMeta != nil && len(children) > 0 && len(meta.TableMeta.Columns) == 0 {
 		for _, child := range children {
 			metaChild := printer.MetaDataForObject(child, nil)
 			if metaChild != nil {
 				meta.TableMeta.Columns = append(meta.TableMeta.Columns, metaChild)
+				if slices.Contains(meta.TableMeta.Index, metaChild.Name) {
+					metaChild.Flags |= MetricIsPartOfIndex
+				}
+				switch metaChild.DisplayHint {
+				case "n":
+					//ok
+				case "e", "a":
+					//meta.TableMeta.Index = append(meta.TableMeta.Index, metaChild.Name)
+				case "":
+					printer.calculateDisplayHint(child, metaChild)
+					println(metaChild.Name, "display=[", metaChild.DisplayHint, "]")
+				default:
+					//println(metaChild.Name, "display=[", metaChild.DisplayHint, "]")
+				}
+			}
+		}
+		if meta.TableMeta.Prefix == "" {
+			if len(meta.TableMeta.Columns) > 1 {
+				meta.TableMeta.Prefix = meta.TableMeta.Columns[0].SnakeName
+				for i := 1; i < len(meta.TableMeta.Columns); i++ {
+					meta.TableMeta.Prefix = findCommonPrefix(meta.TableMeta.Prefix, meta.TableMeta.Columns[i].SnakeName)
+				}
 			}
 		}
 	}

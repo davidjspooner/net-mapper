@@ -8,18 +8,32 @@ import (
 
 type TableMeta struct {
 	Name    string
+	Prefix  string
 	Index   []MetricName
 	Columns []*MetricMeta
 }
 
+type MetricFlag uint
+
+const (
+	MetricIsString MetricFlag = 1 << iota
+	MetricIsPartOfIndex
+)
+
 type MetricMeta struct {
 	Name        MetricName
+	SnakeName   string
 	SnmpType    string
 	Help, Type  string
 	DisplayHint string
 	Formatter   ValueFormatFunc
 	Enums       map[int]string
 	TableMeta   *TableMeta
+	Flags       MetricFlag
+}
+
+func (meta *MetricMeta) IsLabel() bool {
+	return meta.Flags&(MetricIsString|MetricIsPartOfIndex) != 0
 }
 
 type RowIndex string
@@ -91,26 +105,14 @@ func (mb *MetricBlock) Init(tableMeta *TableMeta) {
 }
 
 // findCommonPrefix finds the common prefix among metric names.
-func findCommonPrefix(metricNames []MetricName) MetricName {
-	if len(metricNames) == 0 {
-		return ""
-	}
-
-	prefix := metricNames[0]
-	for i := 1; i < len(metricNames); i++ {
-		name := metricNames[i]
-		if len(name) < len(prefix) {
-			prefix = prefix[:len(name)]
-		}
-		// Find the common prefix
-		for j := 0; j < len(prefix); j++ {
-			if prefix[j] != name[j] {
-				prefix = prefix[:j]
-				break
-			}
+func findCommonPrefix(a, b string) string {
+	prefixLen := min(len(a), len(b))
+	for i := 0; i < prefixLen; i++ {
+		if a[i] != b[i] {
+			return a[:i]
 		}
 	}
-	return prefix
+	return a[:prefixLen]
 }
 
 func (mb *MetricBlock) LabelMap() map[RowIndex]string {
@@ -119,27 +121,28 @@ func (mb *MetricBlock) LabelMap() map[RowIndex]string {
 		return nil
 	}
 
-	prefix := findCommonPrefix(mb.MetricNames)
+	prefixLen := len(mb.TableMeta.Prefix)
 
 	labelMap := make(map[RowIndex]string)
 	sb := &strings.Builder{}
 	for _, index := range mb.RowIndexes {
 		sb.Reset()
-		for j, columnName := range mb.TableMeta.Index {
-			indexValues := mb.Metrics[columnName]
-			if indexValues != nil {
+		for j, column := range mb.TableMeta.Columns {
+			if column.IsLabel() {
 				if j > 0 {
 					sb.WriteString(",")
 				}
-				indexValue, ok := indexValues.Values[index]
-				columnName = columnName[len(prefix):]
+				metrics := mb.Metrics[column.Name]
+				if metrics == nil {
+					continue
+				}
+				indexValue, ok := metrics.Values[index]
+				columnName := column.SnakeName[prefixLen:]
 				if ok {
 					fmt.Fprintf(sb, "%s=%q", columnName, indexValue.Text)
 				} else {
 					fmt.Fprintf(sb, "%s=%q", columnName, "")
 				}
-			} else {
-				fmt.Printf("debug unknown column %s\n", columnName)
 			}
 		}
 		labelMap[index] = sb.String()
