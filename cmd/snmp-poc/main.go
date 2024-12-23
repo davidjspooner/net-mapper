@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/davidjspooner/dshttp/pkg/logevent"
 	"github.com/davidjspooner/net-mapper/pkg/asn1/asn1error"
-	"github.com/davidjspooner/net-mapper/pkg/logevent"
 	"github.com/davidjspooner/net-mapper/pkg/snmp"
 	"github.com/davidjspooner/net-mapper/pkg/snmp/mibdb"
 )
@@ -128,7 +128,7 @@ func main() {
 		return
 	}
 
-	err=DecodeDump(ctx, "/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
+	err = DecodeDump(ctx, "/home/david/current/20240805_homelab/go/tool/dsnet-mapper/dumps/walk-20240914.pcap", db)
 	if err != nil {
 		fmt.Printf("Error decoding dump: %v\n", err)
 	}
