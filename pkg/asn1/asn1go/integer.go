@@ -28,11 +28,11 @@ func (v *Integer) BitSize() int {
 	if L == 0 {
 		return 8 //effectivly an empty byte
 	}
-	if (*v)[0] == 0xFF { //supeflous leading negative sign
-		return L*8 - 1
-	}
-	if (*v)[0] == 0x00 { //supeflous leading zero
-		return L*8 - 1
+	switch (*v)[0] {
+	case 0x00: //supeflous leading zero
+		L--
+	case 0xFF: //supeflous leading negative sign
+		L--
 	}
 	return L * 8
 }
@@ -59,41 +59,37 @@ func (v *Integer) GetInt(bits int) (int64, error) {
 	negate := (*v)[0]&0x80 != 0
 
 	bitsRead := 0
-	for i := len(*v) - 1; i >= 0; i-- {
-		if bitsRead >= bits && (negate && (*v)[i] != 0xFF || !negate && (*v)[i] != 0) {
+	//for i := len(*v) - 1; i >= 0; i-- {
+	for i := 0; i < len(*v); i++ {
+		if bitsRead >= bits && ((negate && (*v)[i] != 0xFF) || (!negate && (*v)[i] != 0)) {
 			return 0, asn1error.NewErrorf("integer is too large for %d bits", bits)
 		}
 		n = n<<8 + int64((*v)[i])
 		bitsRead += 8
 	}
 	if negate {
-		n = -n
+		n <<= (64 - bitsRead)
+		n >>= (64 - bitsRead)
 	}
 	return n, nil
 }
+
 func (v *Integer) SetInt(value int64) {
+	*v = make([]byte, 8)
 	negate := false
 	if value < 0 {
 		negate = true
-		value = -value
 	}
-	buffer := make([]byte, 0, 9)
-	if value == 0 {
-		*v = append(buffer, 0)
-		return
-	}
-	for value > 0 {
-		buffer = append(buffer, byte(value&0xFF))
+	for i := 7; i >= 0; i-- {
+		(*v)[i] = byte(value & 0xFF)
 		value >>= 8
 	}
-	vLen := len(buffer)
-	lastByte := (buffer)[vLen-1]
-	if !negate && lastByte&0x80 != 0 {
-		buffer = append(buffer, 0)
+
+	trim := byte(0x00)
+	if negate {
+		trim = 0xFF
 	}
-	*v = make([]byte, len(buffer))
-	//reverse the bytes
-	for i := 0; i < len(buffer); i++ {
-		(*v)[i] = buffer[len(buffer)-1-i]
+	for len(*v) > 1 && (*v)[0] == trim && ((*v)[1]&0x80) == trim&0x80 {
+		*v = (*v)[1:]
 	}
 }
